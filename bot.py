@@ -1,11 +1,16 @@
+# bot.py
 import os
 import asyncio
-import threading
+import random
 import sqlite3
+import threading
+from datetime import datetime
 from contextlib import closing
 
 from flask import Flask
 from aiogram import Bot, Dispatcher, F
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
@@ -24,58 +29,106 @@ ADMINS = [1739947062, 5655991466]
 INFO_CHANNEL = "https://t.me/+rFs7nnx639BmNzgy"
 FLUD_LINK = "https://t.me/+zTukwrwrqlgxOGUy"
 
-FAQ_TEXT = """
-❓ FAQ
-
-• Как попасть во флуд?
-Заполнить анкету и дождаться решения администрации.
-
-• Когда рассмотрят заявку?
-Как только администраторы будут свободны.
-
-• Можно ли подать заявку повторно?
-Если вы не забанены — да.
-"""
-
-RULES_TEXT = """
-📖 Правила
-
-1. Соблюдайте правила общения.
-2. Уважайте участников.
-3. Не устраивайте конфликты.
-4. Следуйте указаниям администрации.
-"""
-
-ABOUT_FLUD_TEXT = """
-🎭 О флуде
-
-Общий флуд для общения участников разных фандомов.
-"""
-
-FANDOMS_TEXT = """
-🌍 Фандомы
-
-Обсуждение любых фандомов приветствуется.
-"""
+FLUD_CHAT_ID = int(os.getenv("FLUD_CHAT_ID", "-1000000000000"))
 
 app = Flask(__name__)
 
-bot = Bot(TOKEN)
+bot = Bot(
+    token=TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
+
 dp = Dispatcher(storage=MemoryStorage())
 
+QUOTES = [
+    f"✨ Цитата №{i}. Каждая история начинается с первого сообщения."
+    for i in range(1, 101)
+]
 
-@app.route("/")
-def home():
-    return "BOT ONLINE"
+ATMOSPHERES = [
+    f"🌙 Атмосфера №{i}. За каждым сообщением скрывается новая история."
+    for i in range(1, 51)
+]
 
+RULES_TEXT = """
+<b>📖 Правила</b>
 
-def run_web():
-    port = int(os.getenv("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+━━━━━━━━━━━━━━
+
+✨ Уважайте участников.
+✨ Не провоцируйте конфликты.
+✨ Соблюдайте атмосферу общения.
+✨ Следуйте указаниям администрации.
+
+━━━━━━━━━━━━━━
+
+<i>«Хороший флуд держится на уважении.»</i>
+"""
+
+FAQ_TEXT = """
+<b>❓ FAQ</b>
+
+━━━━━━━━━━━━━━
+
+• Как попасть во флуд?
+— Заполнить анкету.
+
+• Когда рассмотрят заявку?
+— После проверки администрацией.
+
+• Можно ли подать заново?
+— Да, если нет бана.
+
+━━━━━━━━━━━━━━
+"""
+
+ABOUT_TEXT = """
+<b>🎭 О флуде</b>
+
+━━━━━━━━━━━━━━
+
+Место для общения,
+сюжетов,
+знакомств,
+идей
+и вдохновения.
+
+━━━━━━━━━━━━━━
+"""
+
+FANDOMS_TEXT = """
+<b>🌍 Фандомы</b>
+
+━━━━━━━━━━━━━━
+
+Приветствуются любые фандомы,
+каноны,
+авторские миры
+и кроссоверы.
+
+━━━━━━━━━━━━━━
+"""
+
+WELCOME = """
+<b>✨ Добро пожаловать ✨</b>
+
+━━━━━━━━━━━━━━
+
+<i>Каждая история начинается с первого сообщения.</i>
+
+Перед подачей заявки обязательно ознакомьтесь с информационным каналом.
+
+━━━━━━━━━━━━━━
+"""
+
+# ---------------- DATABASE ----------------
+
+def db():
+    return sqlite3.connect("flud.db")
 
 
 def init_db():
-    with closing(sqlite3.connect("flud.db")) as conn:
+    with closing(db()) as conn:
         cur = conn.cursor()
 
         cur.execute("""
@@ -84,33 +137,42 @@ def init_db():
             username TEXT,
             role TEXT,
             fandom TEXT,
-            status TEXT DEFAULT 'pending'
+            status TEXT DEFAULT 'pending',
+            created_at TEXT
+        )
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS logs(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            admin_id INTEGER,
+            action TEXT,
+            created_at TEXT
+        )
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS bans(
+            user_id INTEGER PRIMARY KEY,
+            admin_id INTEGER,
+            created_at TEXT
         )
         """)
 
         cur.execute("""
         CREATE TABLE IF NOT EXISTS applications(
             user_id INTEGER PRIMARY KEY,
-            admin_msg_1 INTEGER,
-            admin_msg_2 INTEGER
+            msg_admin_1 INTEGER,
+            msg_admin_2 INTEGER
         )
         """)
 
         conn.commit()
 
 
-def get_user(user_id):
-    with closing(sqlite3.connect("flud.db")) as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT * FROM users WHERE user_id=?",
-            (user_id,)
-        )
-        return cur.fetchone()
-
-
-def get_status(user_id):
-    with closing(sqlite3.connect("flud.db")) as conn:
+def user_status(user_id):
+    with closing(db()) as conn:
         cur = conn.cursor()
         cur.execute(
             "SELECT status FROM users WHERE user_id=?",
@@ -121,95 +183,107 @@ def get_status(user_id):
 
 
 def save_user(user_id, username):
-    with closing(sqlite3.connect("flud.db")) as conn:
+    with closing(db()) as conn:
         cur = conn.cursor()
 
         cur.execute("""
         INSERT OR IGNORE INTO users
-        (user_id, username, status)
-        VALUES (?, ?, 'pending')
-        """, (user_id, username))
+        (user_id,username,created_at)
+        VALUES(?,?,?)
+        """, (
+            user_id,
+            username,
+            datetime.now().strftime("%d.%m.%Y %H:%M")
+        ))
 
         conn.commit()
 
 
 def update_profile(user_id, role, fandom):
-    with closing(sqlite3.connect("flud.db")) as conn:
+    with closing(db()) as conn:
         cur = conn.cursor()
 
         cur.execute("""
         UPDATE users
-        SET role=?, fandom=?, status='pending'
+        SET role=?,
+            fandom=?,
+            status='pending'
         WHERE user_id=?
-        """, (role, fandom, user_id))
+        """, (
+            role,
+            fandom,
+            user_id
+        ))
 
         conn.commit()
 
 
 def update_status(user_id, status):
-    with closing(sqlite3.connect("flud.db")) as conn:
+    with closing(db()) as conn:
         cur = conn.cursor()
 
-        cur.execute(
-            "UPDATE users SET status=? WHERE user_id=?",
-            (status, user_id)
-        )
+        cur.execute("""
+        UPDATE users
+        SET status=?
+        WHERE user_id=?
+        """, (
+            status,
+            user_id
+        ))
 
         conn.commit()
 
 
-def save_application(user_id, msg1, msg2):
-    with closing(sqlite3.connect("flud.db")) as conn:
+def add_log(user_id, admin_id, action):
+    with closing(db()) as conn:
+        cur = conn.cursor()
+
+        cur.execute("""
+        INSERT INTO logs
+        (user_id,admin_id,action,created_at)
+        VALUES(?,?,?,?)
+        """, (
+            user_id,
+            admin_id,
+            action,
+            datetime.now().strftime("%d.%m.%Y %H:%M")
+        ))
+
+        conn.commit()
+
+
+def save_application(user_id, m1, m2):
+    with closing(db()) as conn:
         cur = conn.cursor()
 
         cur.execute("""
         INSERT OR REPLACE INTO applications
-        (user_id, admin_msg_1, admin_msg_2)
-        VALUES (?, ?, ?)
-        """, (user_id, msg1, msg2))
+        VALUES(?,?,?)
+        """, (
+            user_id,
+            m1,
+            m2
+        ))
 
         conn.commit()
 
 
 def get_application(user_id):
-    with closing(sqlite3.connect("flud.db")) as conn:
+    with closing(db()) as conn:
         cur = conn.cursor()
 
         cur.execute("""
-        SELECT admin_msg_1, admin_msg_2
+        SELECT msg_admin_1,msg_admin_2
         FROM applications
         WHERE user_id=?
-        """, (user_id,))
+        """, (
+            user_id,
+        ))
 
         return cur.fetchone()
 
 
-def stats():
-    with closing(sqlite3.connect("flud.db")) as conn:
-        cur = conn.cursor()
-
-        total = cur.execute(
-            "SELECT COUNT(*) FROM users"
-        ).fetchone()[0]
-
-        accepted = cur.execute(
-            "SELECT COUNT(*) FROM users WHERE status='accepted'"
-        ).fetchone()[0]
-
-        rejected = cur.execute(
-            "SELECT COUNT(*) FROM users WHERE status='rejected'"
-        ).fetchone()[0]
-
-        banned = cur.execute(
-            "SELECT COUNT(*) FROM users WHERE status='banned'"
-        ).fetchone()[0]
-
-        pending = cur.execute(
-            "SELECT COUNT(*) FROM users WHERE status='pending'"
-        ).fetchone()[0]
-
-        return total, accepted, rejected, banned, pending
-
+# ---------------- FSM ----------------
 
 class Register(StatesGroup):
     question = State()
@@ -217,8 +291,29 @@ class Register(StatesGroup):
     fandom = State()
 
 
-class BroadcastState(StatesGroup):
+class Broadcast(StatesGroup):
     text = State()
+
+
+# ---------------- KEYBOARDS ----------------
+
+def info_kb():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📢 Инфо-канал",
+                    url=INFO_CHANNEL
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✅ Ознакомился",
+                    callback_data="read_info"
+                )
+            ]
+        ]
+    )
 
 
 def pending_menu():
@@ -227,23 +322,41 @@ def pending_menu():
             [InlineKeyboardButton(text="📖 Правила", callback_data="rules")],
             [InlineKeyboardButton(text="❓ FAQ", callback_data="faq")],
             [InlineKeyboardButton(text="🎭 О флуде", callback_data="about")],
-            [InlineKeyboardButton(text="🌍 Фандомы", callback_data="fandoms")]
+            [InlineKeyboardButton(text="🌍 Фандомы", callback_data="fandoms")],
+            [InlineKeyboardButton(text="✨ Атмосфера", callback_data="atmosphere")],
+            [InlineKeyboardButton(text="🎲 Случайная цитата", callback_data="quote")]
         ]
     )
 
 
-def admin_panel():
+def admin_kb():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📊 Статистика", callback_data="adm_stats")],
-            [InlineKeyboardButton(text="👥 Пользователи", callback_data="adm_users")],
-            [InlineKeyboardButton(text="📨 Заявки", callback_data="adm_apps")],
-            [InlineKeyboardButton(text="📢 Рассылка", callback_data="adm_broadcast")],
-            [InlineKeyboardButton(text="🚫 Бан-лист", callback_data="adm_banlist")],
-            [InlineKeyboardButton(text="👥 Участников во флуде", callback_data="adm_members")]
+            [InlineKeyboardButton(text="📊 Статистика", callback_data="stats")],
+            [InlineKeyboardButton(text="👥 Пользователи", callback_data="users")],
+            [InlineKeyboardButton(text="📨 Заявки", callback_data="apps")],
+            [InlineKeyboardButton(text="📢 Рассылка", callback_data="broadcast")],
+            [InlineKeyboardButton(text="🚫 Бан-лист", callback_data="banlist")],
+            [InlineKeyboardButton(text="👥 Участников во флуде", callback_data="members")]
         ]
     )
 
+
+# ---------------- FLASK ----------------
+
+@app.route("/")
+def home():
+    return "BOT ONLINE"
+
+
+def run_flask():
+    app.run(
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 10000))
+    )
+
+
+# ---------------- START ----------------
 
 @dp.message(CommandStart())
 async def start(message: Message, state: FSMContext):
@@ -253,71 +366,61 @@ async def start(message: Message, state: FSMContext):
         else "Не указан"
     )
 
-    save_user(message.from_user.id, username)
+    save_user(
+        message.from_user.id,
+        username
+    )
 
-    if get_status(message.from_user.id) == "banned":
+    if user_status(message.from_user.id) == "banned":
         await message.answer("🚫 Вы заблокированы.")
         return
-
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📢 Открыть инфо-канал",
-                    url=INFO_CHANNEL
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="✅ Я ознакомился",
-                    callback_data="read_info"
-                )
-            ]
-        ]
-    )
 
     await state.clear()
 
     await message.answer(
-        "Перед подачей заявки ознакомьтесь с инфо-каналом.",
-        reply_markup=kb
+        WELCOME +
+        "\n\n" +
+        random.choice(QUOTES),
+        reply_markup=info_kb()
     )
 
 
 @dp.callback_query(F.data == "read_info")
-async def read_info(callback: CallbackQuery, state: FSMContext):
-    if get_status(callback.from_user.id) == "banned":
-        await callback.answer("Вы заблокированы", show_alert=True)
-        return
-
+async def read_info(call: CallbackQuery, state: FSMContext):
     await state.set_state(Register.question)
 
-    await callback.message.answer(
+    await call.message.answer(
+        "<b>❓ Проверочный вопрос</b>\n\n"
         "Максимальный срок реста?"
     )
 
-    await callback.answer()
+    await call.answer()
 
 
 @dp.message(Register.question)
-async def question_step(message: Message, state: FSMContext):
-    if message.text.strip().lower() != "3 недели":
+async def q_step(message: Message, state: FSMContext):
+    if message.text.lower().strip() != "3 недели":
         await message.answer(
-            "❌ Неверно. Попробуйте ещё раз."
+            "🚫 Неверно.\n\nПопробуйте ещё раз."
         )
         return
 
     await state.set_state(Register.role)
 
-    await message.answer("🎭 Укажите роль:")
+    await message.answer(
+        "🎭 Укажите вашу роль:"
+    )
 
 
 @dp.message(Register.role)
 async def role_step(message: Message, state: FSMContext):
     await state.update_data(role=message.text)
+
     await state.set_state(Register.fandom)
 
-    await message.answer("🌍 Укажите фандом:")
+    await message.answer(
+        "🌍 Укажите фандом:"
+    )
 
 
 @dp.message(Register.fandom)
@@ -327,25 +430,32 @@ async def fandom_step(message: Message, state: FSMContext):
     role = data["role"]
     fandom = message.text
 
-    username = (
-        f"@{message.from_user.username}"
-        if message.from_user.username
-        else "Не указан"
-    )
-
     update_profile(
         message.from_user.id,
         role,
         fandom
     )
 
-    text = (
-        "📨 Новая заявка\n\n"
-        f"Username: {username}\n"
-        f"Telegram ID: {message.from_user.id}\n"
-        f"Роль: {role}\n"
-        f"Фандом: {fandom}"
+    username = (
+        f"@{message.from_user.username}"
+        if message.from_user.username
+        else "Не указан"
     )
+
+    text = f"""
+<b>📨 Новая заявка</b>
+
+━━━━━━━━━━━━━━
+
+Username: {username}
+ID: <code>{message.from_user.id}</code>
+
+🎭 Роль:
+{role}
+
+🌍 Фандом:
+{fandom}
+"""
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -373,12 +483,12 @@ async def fandom_step(message: Message, state: FSMContext):
     ids = []
 
     for admin in ADMINS:
-        msg = await bot.send_message(
+        m = await bot.send_message(
             admin,
             text,
             reply_markup=kb
         )
-        ids.append(msg.message_id)
+        ids.append(m.message_id)
 
     save_application(
         message.from_user.id,
@@ -387,168 +497,289 @@ async def fandom_step(message: Message, state: FSMContext):
     )
 
     await message.answer(
-        "✅ Заявка отправлена администрации.",
+        "<b>📨 Заявка отправлена администрации.</b>\n\n"
+        "Пока ожидаете решения — можете изучить разделы ниже.",
         reply_markup=pending_menu()
     )
 
     await state.clear()
 
 
-async def update_admin_messages(user_id, text):
-    app_row = get_application(user_id)
+# ---------------- USER MENU ----------------
 
-    if not app_row:
+@dp.callback_query(F.data == "rules")
+async def rules(call: CallbackQuery):
+    await call.message.answer(RULES_TEXT)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "faq")
+async def faq(call: CallbackQuery):
+    await call.message.answer(FAQ_TEXT)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "about")
+async def about(call: CallbackQuery):
+    await call.message.answer(ABOUT_TEXT)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "fandoms")
+async def fandoms(call: CallbackQuery):
+    await call.message.answer(FANDOMS_TEXT)
+    await call.answer()
+
+
+@dp.callback_query(F.data == "atmosphere")
+async def atmosphere(call: CallbackQuery):
+    await call.message.answer(random.choice(ATMOSPHERES))
+    await call.answer()
+
+
+@dp.callback_query(F.data == "quote")
+async def quote(call: CallbackQuery):
+    await call.message.answer(random.choice(QUOTES))
+    await call.answer()
+
+
+# ---------------- APPLICATION PROCESS ----------------
+
+async def edit_admin_messages(user_id, text):
+    row = get_application(user_id)
+
+    if not row:
         return
 
-    for admin, msg_id in zip(ADMINS, app_row):
+    for admin_id, msg_id in zip(ADMINS, row):
         try:
             await bot.edit_message_text(
                 text=text,
-                chat_id=admin,
+                chat_id=admin_id,
                 message_id=msg_id
             )
-        except Exception:
+        except:
             pass
 
 
 @dp.callback_query(F.data.startswith("accept:"))
-async def accept_user(callback: CallbackQuery):
-    if callback.from_user.id not in ADMINS:
+async def accept(call: CallbackQuery):
+    if call.from_user.id not in ADMINS:
         return
 
-    user_id = int(callback.data.split(":")[1])
+    user_id = int(call.data.split(":")[1])
 
-    if get_status(user_id) != "pending":
-        await callback.answer("Уже обработано")
+    if user_status(user_id) != "pending":
+        await call.answer("Уже обработано")
         return
 
     update_status(user_id, "accepted")
 
+    add_log(
+        user_id,
+        call.from_user.id,
+        "accepted"
+    )
+
     try:
         await bot.send_message(
             user_id,
-            f"✅ Заявка одобрена.\n\n{FLUD_LINK}"
+            f"""
+<b>🎉 Поздравляем!</b>
+
+━━━━━━━━━━━━━━
+
+Ваша заявка одобрена.
+
+✨ Добро пожаловать.
+
+🌍 Ссылка на флуд:
+
+{FLUD_LINK}
+
+━━━━━━━━━━━━━━
+
+{random.choice(QUOTES)}
+"""
         )
-    except Exception:
+    except:
         pass
 
-    await update_admin_messages(
-        user_id,
-        "✅ Пользователь принят"
+    admin_name = (
+        f"@{call.from_user.username}"
+        if call.from_user.username
+        else str(call.from_user.id)
     )
 
-    await callback.answer("Принято")
+    await edit_admin_messages(
+        user_id,
+        f"✅ Пользователь принят\n\nАдминистратор: {admin_name}"
+    )
+
+    await call.answer("Принято")
 
 
 @dp.callback_query(F.data.startswith("reject:"))
-async def reject_user(callback: CallbackQuery):
-    if callback.from_user.id not in ADMINS:
+async def reject(call: CallbackQuery):
+    if call.from_user.id not in ADMINS:
         return
 
-    user_id = int(callback.data.split(":")[1])
-
-    if get_status(user_id) != "pending":
-        await callback.answer("Уже обработано")
-        return
+    user_id = int(call.data.split(":")[1])
 
     update_status(user_id, "rejected")
+
+    add_log(
+        user_id,
+        call.from_user.id,
+        "rejected"
+    )
 
     try:
         await bot.send_message(
             user_id,
-            "❌ Ваша заявка отклонена."
+            """
+❌ Заявка отклонена.
+
+Вы можете попробовать позже.
+"""
         )
-    except Exception:
+    except:
         pass
 
-    await update_admin_messages(
-        user_id,
-        "❌ Пользователь отклонён"
+    admin_name = (
+        f"@{call.from_user.username}"
+        if call.from_user.username
+        else str(call.from_user.id)
     )
 
-    await callback.answer("Отклонено")
+    await edit_admin_messages(
+        user_id,
+        f"❌ Пользователь отклонён\n\nАдминистратор: {admin_name}"
+    )
+
+    await call.answer("Отклонено")
 
 
 @dp.callback_query(F.data.startswith("ban:"))
-async def ban_user(callback: CallbackQuery):
-    if callback.from_user.id not in ADMINS:
+async def ban(call: CallbackQuery):
+    if call.from_user.id not in ADMINS:
         return
 
-    user_id = int(callback.data.split(":")[1])
+    user_id = int(call.data.split(":")[1])
 
     update_status(user_id, "banned")
+
+    with closing(db()) as conn:
+        cur = conn.cursor()
+
+        cur.execute("""
+        INSERT OR REPLACE INTO bans
+        VALUES(?,?,?)
+        """, (
+            user_id,
+            call.from_user.id,
+            datetime.now().strftime("%d.%m.%Y %H:%M")
+        ))
+
+        conn.commit()
+
+    add_log(
+        user_id,
+        call.from_user.id,
+        "banned"
+    )
 
     try:
         await bot.send_message(
             user_id,
             "🚫 Вы заблокированы."
         )
-    except Exception:
+    except:
         pass
 
-    await update_admin_messages(
-        user_id,
-        "🚫 Пользователь забанен"
+    admin_name = (
+        f"@{call.from_user.username}"
+        if call.from_user.username
+        else str(call.from_user.id)
     )
 
-    await callback.answer("Забанен")
+    await edit_admin_messages(
+        user_id,
+        f"🚫 Пользователь забанен\n\nАдминистратор: {admin_name}"
+    )
 
+    await call.answer("Забанен")
+
+
+# ---------------- ADMIN ----------------
 
 @dp.message(Command("admin"))
-async def admin_cmd(message: Message):
+async def admin(message: Message):
     if message.from_user.id not in ADMINS:
         return
 
     await message.answer(
-        "⚙️ Админ-панель",
-        reply_markup=admin_panel()
+        "<b>⚙️ Админ-панель</b>",
+        reply_markup=admin_kb()
     )
 
 
-@dp.callback_query(F.data == "adm_stats")
-async def admin_stats(callback: CallbackQuery):
-    total, accepted, rejected, banned, pending = stats()
+@dp.callback_query(F.data == "stats")
+async def stats(call: CallbackQuery):
+    with closing(db()) as conn:
+        cur = conn.cursor()
 
-    await callback.message.answer(
-        f"📊 Статистика\n\n"
-        f"Всего пользователей: {total}\n"
-        f"Принято: {accepted}\n"
-        f"Отклонено: {rejected}\n"
-        f"Забанено: {banned}\n"
-        f"Ожидают: {pending}"
+        total = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        accepted = cur.execute("SELECT COUNT(*) FROM users WHERE status='accepted'").fetchone()[0]
+        rejected = cur.execute("SELECT COUNT(*) FROM users WHERE status='rejected'").fetchone()[0]
+        banned = cur.execute("SELECT COUNT(*) FROM users WHERE status='banned'").fetchone()[0]
+        pending = cur.execute("SELECT COUNT(*) FROM users WHERE status='pending'").fetchone()[0]
+
+    await call.message.answer(
+        f"""
+<b>📊 Статистика</b>
+
+━━━━━━━━━━━━━━
+
+👥 Всего: {total}
+✅ Принято: {accepted}
+❌ Отклонено: {rejected}
+🚫 Забанено: {banned}
+📨 Ожидают: {pending}
+"""
     )
 
-    await callback.answer()
+    await call.answer()
 
 
-@dp.callback_query(F.data == "adm_users")
-async def admin_users(callback: CallbackQuery):
-    with closing(sqlite3.connect("flud.db")) as conn:
+@dp.callback_query(F.data == "users")
+async def users(call: CallbackQuery):
+    with closing(db()) as conn:
         cur = conn.cursor()
 
         rows = cur.execute("""
         SELECT username,user_id,status
         FROM users
-        ORDER BY rowid DESC
+        ORDER BY user_id DESC
         LIMIT 20
         """).fetchall()
 
-    text = "👥 Последние пользователи\n\n"
+    text = "<b>👥 Последние пользователи</b>\n\n"
 
-    for row in rows:
+    for r in rows:
         text += (
-            f"{row[0]}\n"
-            f"ID: {row[1]}\n"
-            f"Статус: {row[2]}\n\n"
+            f"{r[0]}\n"
+            f"ID: {r[1]}\n"
+            f"Статус: {r[2]}\n\n"
         )
 
-    await callback.message.answer(text)
-    await callback.answer()
+    await call.message.answer(text)
+    await call.answer()
 
 
-@dp.callback_query(F.data == "adm_apps")
-async def admin_apps(callback: CallbackQuery):
-    with closing(sqlite3.connect("flud.db")) as conn:
+@dp.callback_query(F.data == "apps")
+async def apps(call: CallbackQuery):
+    with closing(db()) as conn:
         cur = conn.cursor()
 
         rows = cur.execute("""
@@ -558,73 +789,63 @@ async def admin_apps(callback: CallbackQuery):
         """).fetchall()
 
     if not rows:
-        await callback.message.answer("Нет ожидающих заявок.")
-        await callback.answer()
+        await call.message.answer("📭 Нет заявок.")
+        await call.answer()
         return
 
-    text = "📨 Ожидающие заявки\n\n"
+    text = "<b>📨 Заявки</b>\n\n"
 
-    for row in rows:
+    for r in rows:
         text += (
-            f"{row[0]}\n"
-            f"ID: {row[1]}\n"
-            f"Роль: {row[2]}\n"
-            f"Фандом: {row[3]}\n\n"
+            f"{r[0]}\n"
+            f"ID: {r[1]}\n"
+            f"Роль: {r[2]}\n"
+            f"Фандом: {r[3]}\n\n"
         )
 
-    await callback.message.answer(text)
-    await callback.answer()
+    await call.message.answer(text)
+    await call.answer()
 
 
-@dp.callback_query(F.data == "adm_banlist")
-async def admin_banlist(callback: CallbackQuery):
-    with closing(sqlite3.connect("flud.db")) as conn:
+@dp.callback_query(F.data == "banlist")
+async def banlist(call: CallbackQuery):
+    with closing(db()) as conn:
         cur = conn.cursor()
 
         rows = cur.execute("""
-        SELECT username,user_id
-        FROM users
-        WHERE status='banned'
+        SELECT user_id
+        FROM bans
         """).fetchall()
+
+    text = "<b>🚫 Бан-лист</b>\n\n"
 
     if not rows:
-        await callback.message.answer("Бан-лист пуст.")
-        await callback.answer()
-        return
+        text += "Пусто."
 
-    text = "🚫 Бан-лист\n\n"
+    for r in rows:
+        text += f"{r[0]}\n"
 
-    for row in rows:
-        text += f"{row[0]} | {row[1]}\n"
-
-    await callback.message.answer(text)
-    await callback.answer()
+    await call.message.answer(text)
+    await call.answer()
 
 
-@dp.callback_query(F.data == "adm_broadcast")
-async def broadcast_menu(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(BroadcastState.text)
+@dp.callback_query(F.data == "broadcast")
+async def broadcast(call: CallbackQuery, state: FSMContext):
+    await state.set_state(Broadcast.text)
 
-    await callback.message.answer(
-        "Введите текст рассылки."
+    await call.message.answer(
+        "📢 Отправьте текст рассылки."
     )
 
-    await callback.answer()
+    await call.answer()
 
 
-@dp.message(Command("broadcast"))
-async def broadcast_command(message: Message):
+@dp.message(Broadcast.text)
+async def broadcast_send(message: Message, state: FSMContext):
     if message.from_user.id not in ADMINS:
         return
 
-    parts = message.text.split(maxsplit=1)
-
-    if len(parts) < 2:
-        return
-
-    text = parts[1]
-
-    with closing(sqlite3.connect("flud.db")) as conn:
+    with closing(db()) as conn:
         cur = conn.cursor()
 
         users = cur.execute("""
@@ -633,94 +854,54 @@ async def broadcast_command(message: Message):
         WHERE status='accepted'
         """).fetchall()
 
-    sent = 0
+    success = 0
+    errors = 0
 
-    for user in users:
+    for u in users:
         try:
-            await bot.send_message(user[0], text)
-            sent += 1
-        except Exception:
-            pass
+            await bot.send_message(
+                u[0],
+                message.text
+            )
+            success += 1
+        except:
+            errors += 1
 
     await message.answer(
-        f"Отправлено: {sent}"
-    )
+        f"""
+<b>📢 Рассылка завершена</b>
 
+━━━━━━━━━━━━━━
 
-@dp.message(BroadcastState.text)
-async def broadcast_fsm(message: Message, state: FSMContext):
-    if message.from_user.id not in ADMINS:
-        return
-
-    with closing(sqlite3.connect("flud.db")) as conn:
-        cur = conn.cursor()
-
-        users = cur.execute("""
-        SELECT user_id
-        FROM users
-        WHERE status='accepted'
-        """).fetchall()
-
-    sent = 0
-
-    for user in users:
-        try:
-            await bot.send_message(user[0], message.text)
-            sent += 1
-        except Exception:
-            pass
-
-    await message.answer(
-        f"Рассылка завершена.\nОтправлено: {sent}"
+✅ Успешно: {success}
+❌ Ошибки: {errors}
+👥 Всего: {len(users)}
+"""
     )
 
     await state.clear()
 
 
-@dp.callback_query(F.data == "adm_members")
-async def members_count(callback: CallbackQuery):
-    if callback.from_user.id not in ADMINS:
-        return
-
+@dp.callback_query(F.data == "members")
+async def members(call: CallbackQuery):
     try:
-        chat = await bot.get_chat(FLUD_LINK)
-        count = await bot.get_chat_member_count(chat.id)
-
-        await callback.message.answer(
-            f"👥 Участников: {count}"
-        )
-    except Exception:
-        await callback.message.answer(
-            "Не удалось получить количество участников.\n"
-            "Добавьте бота администратором группы."
+        count = await bot.get_chat_member_count(
+            FLUD_CHAT_ID
         )
 
-    await callback.answer()
+        await call.message.answer(
+            f"👥 Участников во флуде: {count}"
+        )
+
+    except:
+        await call.message.answer(
+            "⚠️ Укажите FLUD_CHAT_ID и выдайте боту права администратора."
+        )
+
+    await call.answer()
 
 
-@dp.callback_query(F.data == "rules")
-async def rules(callback: CallbackQuery):
-    await callback.message.answer(RULES_TEXT)
-    await callback.answer()
-
-
-@dp.callback_query(F.data == "faq")
-async def faq(callback: CallbackQuery):
-    await callback.message.answer(FAQ_TEXT)
-    await callback.answer()
-
-
-@dp.callback_query(F.data == "about")
-async def about(callback: CallbackQuery):
-    await callback.message.answer(ABOUT_FLUD_TEXT)
-    await callback.answer()
-
-
-@dp.callback_query(F.data == "fandoms")
-async def fandoms(callback: CallbackQuery):
-    await callback.message.answer(FANDOMS_TEXT)
-    await callback.answer()
-
+# ---------------- MAIN ----------------
 
 async def main():
     init_db()
@@ -729,7 +910,7 @@ async def main():
 
 if __name__ == "__main__":
     threading.Thread(
-        target=run_web,
+        target=run_flask,
         daemon=True
     ).start()
 
