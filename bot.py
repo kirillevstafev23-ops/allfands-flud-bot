@@ -1,18 +1,32 @@
+import os
+import asyncio
+import threading
+
+from flask import Flask
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import CommandStart
-import asyncio
-import os
 
 TOKEN = os.getenv("TOKEN")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+    return "ALLFANDS FLUD BOT ONLINE"
+
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
 
 @dp.message(CommandStart())
 async def start(message: Message):
-
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📖 О флуде", callback_data="about")],
@@ -56,8 +70,7 @@ async def admins(callback: CallbackQuery):
 @dp.callback_query(F.data == "stats")
 async def stats(callback: CallbackQuery):
     await callback.message.answer(
-        "📊 Статистика\n\n"
-        "Возраст флуда: почти 1 год"
+        "📊 Статистика\n\nВозраст флуда: почти 1 год"
     )
 
 
@@ -73,4 +86,5 @@ async def main():
 
 
 if __name__ == "__main__":
+    threading.Thread(target=run_web, daemon=True).start()
     asyncio.run(main())
