@@ -26,6 +26,23 @@ FLUD_LINK = "https://t.me/+zTukwrwrqlgxOGUy"
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
+# СОЗДАНИЕ БАЗЫ ДАННЫХ
+conn = sqlite3.connect("flud.db")
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    role TEXT,
+    fandom TEXT,
+    status TEXT
+)
+""")
+
+conn.commit()
+conn.close()
+
 app = Flask(__name__)
 
 
@@ -107,6 +124,8 @@ async def read_info(callback: CallbackQuery, state: FSMContext):
 
     await state.set_state(Registration.role)
 
+    await callback.answer()
+
 
 @dp.message(Registration.role)
 async def get_role(message: Message, state: FSMContext):
@@ -130,16 +149,23 @@ async def get_fandom(message: Message, state: FSMContext):
 
     user = message.from_user
 
+    username = (
+        f"@{user.username}"
+        if user.username
+        else "Не указан"
+    )
+
     save_user(
         user.id,
-        user.username,
+        username,
         role,
         fandom
     )
 
     text = (
         f"📨 Новая заявка\n\n"
-        f"👤 Пользователь: @{user.username}\n"
+        f"👤 Username: {username}\n"
+        f"📛 Имя: {user.full_name}\n"
         f"🆔 ID: {user.id}\n\n"
         f"🎭 Роль: {role}\n"
         f"🌍 Фандом: {fandom}"
@@ -217,5 +243,9 @@ async def main():
 
 
 if __name__ == "__main__":
-    threading.Thread(target=run_web, daemon=True).start()
+    threading.Thread(
+        target=run_web,
+        daemon=True
+    ).start()
+
     asyncio.run(main())
