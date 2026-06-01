@@ -208,10 +208,6 @@ async def role(message: Message, state: FSMContext):
 @dp.message(Form.fandom)
 async def fandom(message: Message, state: FSMContext):
 
-    if get_status(message.from_user.id) == "pending":
-        await message.answer("⟡ заявка уже существует")
-        return
-
     data = await state.get_data()
 
     role = data.get("role")
