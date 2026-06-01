@@ -52,10 +52,9 @@ RULES_TEXT = """
 <b>📖 Правила</b>
 
 ━━━━━━━━━━━━━━
-✨ Уважайте участников и их роли.
+✨ Уважайте участников.
 ✨ Не провоцируйте конфликты.
-✨ Сохраняйте атмосферу ролевого общения.
-✨ Администрация всегда имеет финальное слово.
+✨ Соблюдайте атмосферу общения.
 ━━━━━━━━━━━━━━
 """
 
@@ -64,45 +63,16 @@ FAQ_TEXT = """
 
 ━━━━━━━━━━━━━━
 • Как попасть во флуд?
-— Заполнить анкету и пройти проверку.
-
-• Когда рассмотрят заявку?
-— Обычно в течение ближайшего времени после проверки.
-
-• Можно ли менять роль?
-— Да, через повторную анкету.
+— Заполнить анкету.
+• Когда рассмотрят?
+— После проверки.
 ━━━━━━━━━━━━━━
 """
 
-ABOUT_TEXT = """
-<b>🎭 О флуде</b>
-━━━━━━━━━━━━━━
-Это место для общения, сюжетов, ролевых сцен и идей.
-Каждый участник создаёт свою историю.
-━━━━━━━━━━━━━━
-"""
+ABOUT_TEXT = "<b>🎭 О флуде</b>\n━━━━━━━━━━━━━━\nМесто общения, сюжетов и идей.\n━━━━━━━━━━━━━━"
+FANDOMS_TEXT = "<b>🌍 Фандомы</b>\n━━━━━━━━━━━━━━\nЛюбые фандомы приветствуются.\n━━━━━━━━━━━━━━"
 
-FANDOMS_TEXT = """
-<b>🌍 Фандомы</b>
-━━━━━━━━━━━━━━
-Фандом — это мир, из которого пришёл ваш персонаж.
-
-📌 Это может быть:
-• Фильмы / сериалы (Marvel, Harry Potter)
-• Аниме (Naruto, Jujutsu Kaisen)
-• Игры (Genshin Impact, Minecraft)
-• Или полностью ваш оригинальный мир
-
-✨ Можно также придумать свой фандом (ориджинал вселенная)
-━━━━━━━━━━━━━━
-"""
-
-WELCOME = """
-<b>✨ Добро пожаловать ✨</b>
-━━━━━━━━━━━━━━
-<i>Каждая история начинается с первого сообщения.</i>
-━━━━━━━━━━━━━━
-"""
+WELCOME = "<b>✨ Добро пожаловать ✨</b>\n━━━━━━━━━━━━━━\n<i>Каждая история начинается с первого сообщения.</i>"
 
 # ---------------- DB ----------------
 
@@ -352,7 +322,7 @@ async def q_step(message: Message, state: FSMContext):
             await message.answer("🚫 Неверно")
             return
         await state.set_state(Register.role)
-        await message.answer("🎭 Роль?\n<i>Кто ваш персонаж или какую роль вы играете в мире.</i>")
+        await message.answer("🎭 Роль?")
     except Exception as e:
         logger.exception(e)
 
@@ -362,11 +332,7 @@ async def role_step(message: Message, state: FSMContext):
     try:
         await state.update_data(role=message.text)
         await state.set_state(Register.fandom)
-        await message.answer(
-            "🌍 Фандом?\n"
-            "<i>Фандом — это мир/вселенная, откуда ваш персонаж.\n"
-            "Например: Harry Potter, Naruto, Genshin Impact или ваш оригинальный мир.</i>"
-        )
+        await message.answer("🌍 Фандом?")
     except Exception as e:
         logger.exception(e)
 
@@ -383,14 +349,14 @@ async def fandom_step(message: Message, state: FSMContext):
         username = f"@{message.from_user.username}" if message.from_user.username else "Не указан"
 
         text = f"""
-📨 <b>Новая заявка</b>
+📨 Новая заявка
 
 ━━━━━━━━━━━━━━
-👤 Пользователь: {username}
-🆔 ID: {message.from_user.id}
-🎭 Роль: {role}
-🌍 Фандом: {fandom}
-🕰 Время: {now()}
+👤 {username}
+🆔 {message.from_user.id}
+🎭 {role}
+🌍 {fandom}
+🕰 {now()}
 ━━━━━━━━━━━━━━
 """
 
@@ -412,3 +378,113 @@ async def fandom_step(message: Message, state: FSMContext):
 
     except Exception as e:
         logger.exception(e)
+
+
+# ---------------- PROTECT DOUBLE ACTION ----------------
+
+def lock_check(user_id):
+    status = user_status(user_id)
+    return status == "pending"
+
+
+# ---------------- ADMIN ACTIONS ----------------
+
+async def edit_admin(user_id, text):
+    row = get_application(user_id)
+    if not row:
+        return
+    for admin_id, msg_id in zip(ADMINS, row):
+        try:
+            await bot.edit_message_text(text, admin_id, msg_id)
+        except Exception as e:
+            logger.exception(e)
+
+
+@dp.callback_query(F.data.startswith("accept:"))
+async def accept(call: CallbackQuery):
+    try:
+        if call.from_user.id not in ADMINS:
+            return
+
+        user_id = int(call.data.split(":")[1])
+
+        if not lock_check(user_id):
+            await call.answer("Уже обработано")
+            return
+
+        update_status(user_id, "accepted")
+        add_log(user_id, call.from_user.id, "accepted")
+
+        try:
+            await bot.send_message(user_id,
+                f"✨ Одобрено\n\n{FLUD_LINK}")
+        except Exception as e:
+            logger.exception(e)
+
+        await edit_admin(user_id, "✅ Принято")
+        await call.answer()
+
+    except Exception as e:
+        logger.exception(e)
+
+
+@dp.callback_query(F.data.startswith("reject:"))
+async def reject(call: CallbackQuery):
+    try:
+        if call.from_user.id not in ADMINS:
+            return
+
+        user_id = int(call.data.split(":")[1])
+
+        if not lock_check(user_id):
+            await call.answer("Уже обработано")
+            return
+
+        update_status(user_id, "rejected")
+        add_log(user_id, call.from_user.id, "rejected")
+
+        try:
+            await bot.send_message(user_id, "❌ Отклонено")
+        except Exception as e:
+            logger.exception(e)
+
+        await edit_admin(user_id, "❌ Отклонено")
+        await call.answer()
+
+    except Exception as e:
+        logger.exception(e)
+
+
+@dp.callback_query(F.data.startswith("ban:"))
+async def ban(call: CallbackQuery):
+    try:
+        if call.from_user.id not in ADMINS:
+            return
+
+        user_id = int(call.data.split(":")[1])
+
+        update_status(user_id, "banned")
+        add_log(user_id, call.from_user.id, "banned")
+
+        try:
+            await bot.send_message(user_id, "🚫 Забанен")
+        except Exception as e:
+            logger.exception(e)
+
+        await edit_admin(user_id, "🚫 Бан")
+        await call.answer()
+
+    except Exception as e:
+        logger.exception(e)
+
+
+# ---------------- MAIN ----------------
+
+async def main():
+    init_db()
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    threading.Thread(target=run_flask, daemon=True).start()
+    asyncio.run(main())
