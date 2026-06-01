@@ -24,13 +24,9 @@ ADMINS = [1739947062, 5655991466]
 INFO_CHANNEL = "https://t.me/+rFs7nnx639BmNzgy"
 FLUD_LINK = "https://t.me/+zTukwrwrgxOGUy"
 
-# ---------------- LOGGING ----------------
+# ---------------- BOT ----------------
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 bot = Bot(
     token=TOKEN,
@@ -39,19 +35,16 @@ bot = Bot(
 
 dp = Dispatcher(storage=MemoryStorage())
 
-# ---------------- ANTI-SPAM ----------------
+# ---------------- ANTI SPAM ----------------
 
-user_last_time = {}
-SPAM_DELAY = 15  # секунд между действиями
+last_action = {}
+SPAM_DELAY = 10
 
-def anti_spam(user_id: int) -> bool:
+def spam(user_id: int):
     now = time.time()
-    last = user_last_time.get(user_id, 0)
-
-    if now - last < SPAM_DELAY:
+    if now - last_action.get(user_id, 0) < SPAM_DELAY:
         return True
-
-    user_last_time[user_id] = now
+    last_action[user_id] = now
     return False
 
 # ---------------- DB ----------------
@@ -69,7 +62,7 @@ def init_db():
             username TEXT,
             role TEXT,
             fandom TEXT,
-            status TEXT DEFAULT 'pending',
+            status TEXT DEFAULT 'new',
             created_at TEXT
         )
         """)
@@ -81,59 +74,40 @@ def init_db():
         )
         """)
 
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS logs(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            admin_id INTEGER,
-            action TEXT,
-            created_at TEXT
-        )
-        """)
-
         conn.commit()
 
 def now():
     return datetime.now().strftime("%d.%m.%Y %H:%M")
 
-def save_user(user_id, username):
+def save_user(uid, username):
     with closing(db()) as conn:
         cur = conn.cursor()
         cur.execute("""
         INSERT OR IGNORE INTO users(user_id, username, created_at)
         VALUES (?, ?, ?)
-        """, (user_id, username, now()))
+        """, (uid, username, now()))
         conn.commit()
 
-def update_profile(user_id, role, fandom):
+def get_status(uid):
+    with closing(db()) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT status FROM users WHERE user_id=?", (uid,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+def set_status(uid, status):
+    with closing(db()) as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET status=? WHERE user_id=?", (status, uid))
+        conn.commit()
+
+def update_profile(uid, role, fandom):
     with closing(db()) as conn:
         cur = conn.cursor()
         cur.execute("""
         UPDATE users SET role=?, fandom=?, status='pending'
         WHERE user_id=?
-        """, (role, fandom, user_id))
-        conn.commit()
-
-def get_status(user_id):
-    with closing(db()) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT status FROM users WHERE user_id=?", (user_id,))
-        row = cur.fetchone()
-        return row[0] if row else None
-
-def set_status(user_id, status):
-    with closing(db()) as conn:
-        cur = conn.cursor()
-        cur.execute("UPDATE users SET status=? WHERE user_id=?", (status, user_id))
-        conn.commit()
-
-def log(user_id, admin_id, action):
-    with closing(db()) as conn:
-        cur = conn.cursor()
-        cur.execute("""
-        INSERT INTO logs(user_id, admin_id, action, created_at)
-        VALUES (?, ?, ?, ?)
-        """, (user_id, admin_id, action, now()))
+        """, (role, fandom, uid))
         conn.commit()
 
 # ---------------- FSM ----------------
@@ -148,16 +122,16 @@ class Form(StatesGroup):
 def start_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📢 Инфо-канал", url=INFO_CHANNEL)],
-        [InlineKeyboardButton(text="🚀 Начать анкету", callback_data="start_form")]
+        [InlineKeyboardButton(text="✅ Ознакомился", callback_data="agree")]
     ])
 
-def admin_kb(user_id: int):
+def admin_kb(uid):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Принять", callback_data=f"accept:{user_id}"),
-            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{user_id}")
+            InlineKeyboardButton("✅ Принять", callback_data=f"accept:{uid}"),
+            InlineKeyboardButton("❌ Отклонить", callback_data=f"reject:{uid}")
         ],
-        [InlineKeyboardButton(text="🚫 Бан", callback_data=f"ban:{user_id}")]
+        [InlineKeyboardButton("🚫 Бан", callback_data=f"ban:{uid}")]
     ])
 
 # ---------------- START ----------------
@@ -165,7 +139,7 @@ def admin_kb(user_id: int):
 @dp.message(CommandStart())
 async def start(message: Message, state: FSMContext):
 
-    if anti_spam(message.from_user.id):
+    if spam(message.from_user.id):
         await message.answer("⏳ Не спамь")
         return
 
@@ -181,61 +155,65 @@ async def start(message: Message, state: FSMContext):
     await state.clear()
 
     text = (
-        "✨ <b>Добро пожаловать</b>\n\n"
+        "✨ <b>Добро пожаловать</b>\n"
         "━━━━━━━━━━━━━━\n"
-        "📌 Здесь ты можешь подать заявку\n"
+        "📌 Прежде чем подать заявку — ознакомься\n"
         "━━━━━━━━━━━━━━"
     )
 
     await message.answer(text, reply_markup=start_kb())
 
-# ---------------- FLOW ----------------
+# ---------------- STEP 1 ----------------
 
-@dp.callback_query(F.data == "start_form")
-async def start_form(call: CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data == "agree")
+async def agree(call: CallbackQuery, state: FSMContext):
 
-    if anti_spam(call.from_user.id):
+    if spam(call.from_user.id):
         await call.answer("⏳ Подожди")
         return
 
     await state.set_state(Form.question)
-    await call.message.answer("❓ Сколько длится рест?")
+    await call.message.answer("❓ Контрольный вопрос: сколько длится рест?")
     await call.answer()
 
+# ---------------- STEP 2 ----------------
 
 @dp.message(Form.question)
-async def q(message: Message, state: FSMContext):
+async def question(message: Message, state: FSMContext):
 
     if message.text.lower().strip() != "3 недели":
         await message.answer("🚫 Неверно")
         return
 
     await state.set_state(Form.role)
-    await message.answer("🎭 Ваша роль?")
+    await message.answer("🎭 Укажи свою роль")
 
+# ---------------- STEP 3 ----------------
 
 @dp.message(Form.role)
 async def role(message: Message, state: FSMContext):
+
     await state.update_data(role=message.text)
     await state.set_state(Form.fandom)
-    await message.answer("🌍 Ваш фандом?")
+    await message.answer("🌍 Укажи фандом")
 
+# ---------------- STEP 4 ----------------
 
 @dp.message(Form.fandom)
 async def fandom(message: Message, state: FSMContext):
 
-    if anti_spam(message.from_user.id):
-        await message.answer("⏳ Подожди")
+    if spam(message.from_user.id):
+        await message.answer("⏳ Не спамь")
+        return
+
+    if get_status(message.from_user.id) == "pending":
+        await message.answer("⚠️ Ты уже отправлял заявку")
         return
 
     data = await state.get_data()
 
     role = data["role"]
     fandom = message.text
-
-    if get_status(message.from_user.id) == "pending":
-        await message.answer("⚠️ Заявка уже отправлена")
-        return
 
     update_profile(message.from_user.id, role, fandom)
     set_status(message.from_user.id, "pending")
@@ -261,8 +239,8 @@ async def fandom(message: Message, state: FSMContext):
 
 # ---------------- ADMIN ----------------
 
-def is_admin(user_id: int):
-    return user_id in ADMINS
+def is_admin(uid):
+    return uid in ADMINS
 
 @dp.callback_query(F.data.startswith("accept:"))
 async def accept(call: CallbackQuery):
@@ -270,23 +248,13 @@ async def accept(call: CallbackQuery):
     if not is_admin(call.from_user.id):
         return
 
-    user_id = int(call.data.split(":")[1])
+    uid = int(call.data.split(":")[1])
 
-    if get_status(user_id) != "pending":
-        await call.answer("Уже обработано")
-        return
+    set_status(uid, "accepted")
 
-    set_status(user_id, "accepted")
-    log(user_id, call.from_user.id, "accept")
-
-    await bot.send_message(
-        user_id,
-        f"✨ <b>Заявка одобрена</b>\n\n{FLUD_LINK}"
-    )
-
+    await bot.send_message(uid, f"✨ Одобрено\n\n{FLUD_LINK}")
     await call.message.edit_text("✅ ПРИНЯТО")
     await call.answer()
-
 
 @dp.callback_query(F.data.startswith("reject:"))
 async def reject(call: CallbackQuery):
@@ -294,16 +262,13 @@ async def reject(call: CallbackQuery):
     if not is_admin(call.from_user.id):
         return
 
-    user_id = int(call.data.split(":")[1])
+    uid = int(call.data.split(":")[1])
 
-    set_status(user_id, "rejected")
-    log(user_id, call.from_user.id, "reject")
+    set_status(uid, "rejected")
 
-    await bot.send_message(user_id, "❌ Заявка отклонена")
-
+    await bot.send_message(uid, "❌ Отклонено")
     await call.message.edit_text("❌ ОТКЛОНЕНО")
     await call.answer()
-
 
 @dp.callback_query(F.data.startswith("ban:"))
 async def ban(call: CallbackQuery):
@@ -311,13 +276,11 @@ async def ban(call: CallbackQuery):
     if not is_admin(call.from_user.id):
         return
 
-    user_id = int(call.data.split(":")[1])
+    uid = int(call.data.split(":")[1])
 
-    set_status(user_id, "banned")
-    log(user_id, call.from_user.id, "ban")
+    set_status(uid, "banned")
 
-    await bot.send_message(user_id, "🚫 Вы забанены")
-
+    await bot.send_message(uid, "🚫 Забанен")
     await call.message.edit_text("🚫 БАН")
     await call.answer()
 
