@@ -163,10 +163,6 @@ async def start(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "start_form")
 async def start_form(call: CallbackQuery, state: FSMContext):
 
-    if spam(call.from_user.id):
-        await call.answer("…")
-        return
-
     await state.set_state(Form.question)
 
     await call.message.answer(
@@ -212,18 +208,21 @@ async def role(message: Message, state: FSMContext):
 @dp.message(Form.fandom)
 async def fandom(message: Message, state: FSMContext):
 
-    if spam(message.from_user.id):
-        await message.answer("…")
-        return
-
     if get_status(message.from_user.id) == "pending":
         await message.answer("⟡ заявка уже существует")
         return
 
     data = await state.get_data()
 
-    role = data["role"]
-    fandom = message.text
+role = data.get("role")
+fandom = message.text
+
+if not role:
+    await message.answer(
+        "Произошла ошибка анкеты. Пожалуйста, начни заново через /start"
+    )
+    await state.clear()
+    return
 
     update_profile(message.from_user.id, role, fandom)
     set_status(message.from_user.id, "pending")
@@ -249,7 +248,10 @@ async def fandom(message: Message, state: FSMContext):
         "ожидай ответа администрации."
     )
 
+    try:
     await state.clear()
+except:
+    pass
 
 # ---------------- ADMIN ----------------
 
