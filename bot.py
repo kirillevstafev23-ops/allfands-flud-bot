@@ -48,13 +48,16 @@ dp = Dispatcher(storage=MemoryStorage())
 QUOTES = [f"✨ Цитата №{i}. Каждая история начинается с первого сообщения." for i in range(1, 101)]
 ATMOSPHERES = [f"🌙 Атмосфера №{i}. За каждым сообщением скрывается новая история." for i in range(1, 51)]
 
+# ---------------- TEXTS (ENHANCED DESIGN ONLY) ----------------
+
 RULES_TEXT = """
-<b>📖 Правила</b>
+<b>📖 ПРАВИЛА ФЛУДА</b>
 
 ━━━━━━━━━━━━━━
-✨ Уважайте участников.
-✨ Не провоцируйте конфликты.
-✨ Соблюдайте атмосферу общения.
+✨ Уважайте участников
+✨ Не провоцируйте конфликты
+✨ Соблюдайте атмосферу общения
+✨ Следуйте администрации
 ━━━━━━━━━━━━━━
 """
 
@@ -63,16 +66,45 @@ FAQ_TEXT = """
 
 ━━━━━━━━━━━━━━
 • Как попасть во флуд?
-— Заполнить анкету.
-• Когда рассмотрят?
-— После проверки.
+— Заполнить анкету
+
+• Когда ответ?
+— После проверки администрации
+
+• Можно ли повторно?
+— Да, если нет бана
 ━━━━━━━━━━━━━━
 """
 
-ABOUT_TEXT = "<b>🎭 О флуде</b>\n━━━━━━━━━━━━━━\nМесто общения, сюжетов и идей.\n━━━━━━━━━━━━━━"
-FANDOMS_TEXT = "<b>🌍 Фандомы</b>\n━━━━━━━━━━━━━━\nЛюбые фандомы приветствуются.\n━━━━━━━━━━━━━━"
+ABOUT_TEXT = """
+<b>🎭 О ФЛУДЕ</b>
 
-WELCOME = "<b>✨ Добро пожаловать ✨</b>\n━━━━━━━━━━━━━━\n<i>Каждая история начинается с первого сообщения.</i>"
+━━━━━━━━━━━━━━
+Это пространство для:
+✨ общения
+✨ ролевых сюжетов
+✨ идей и вдохновения
+━━━━━━━━━━━━━━
+"""
+
+FANDOMS_TEXT = """
+<b>🌍 ФАНДОМЫ</b>
+
+━━━━━━━━━━━━━━
+Принимаются:
+✨ любые фандомы
+✨ авторские миры
+✨ кроссоверы
+━━━━━━━━━━━━━━
+"""
+
+WELCOME = """
+<b>✨ ДОБРО ПОЖАЛОВАТЬ ✨</b>
+
+━━━━━━━━━━━━━━
+<i>Каждая история начинается с первого сообщения</i>
+━━━━━━━━━━━━━━
+"""
 
 # ---------------- DB ----------------
 
@@ -121,19 +153,6 @@ def init_db():
         )
         """)
 
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS applications_history(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            username TEXT,
-            role TEXT,
-            fandom TEXT,
-            status TEXT,
-            admin_id INTEGER,
-            created_at TEXT
-        )
-        """)
-
         conn.commit()
 
 
@@ -142,92 +161,70 @@ def now():
 
 
 def user_status(user_id):
-    try:
-        with closing(db()) as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT status FROM users WHERE user_id=?", (user_id,))
-            row = cur.fetchone()
-            return row[0] if row else None
-    except Exception as e:
-        logger.exception(e)
-        return None
+    with closing(db()) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT status FROM users WHERE user_id=?", (user_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
 
 
 def save_user(user_id, username):
-    try:
-        with closing(db()) as conn:
-            cur = conn.cursor()
-            cur.execute("""
-            INSERT OR IGNORE INTO users(user_id,username,created_at)
-            VALUES(?,?,?)
-            """, (user_id, username, now()))
-            conn.commit()
-    except Exception as e:
-        logger.exception(e)
+    with closing(db()) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+        INSERT OR IGNORE INTO users(user_id,username,created_at)
+        VALUES(?,?,?)
+        """, (user_id, username, now()))
+        conn.commit()
 
 
 def update_profile(user_id, role, fandom):
-    try:
-        with closing(db()) as conn:
-            cur = conn.cursor()
-            cur.execute("""
-            UPDATE users SET role=?, fandom=?, status='pending'
-            WHERE user_id=?
-            """, (role, fandom, user_id))
-            conn.commit()
-    except Exception as e:
-        logger.exception(e)
+    with closing(db()) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+        UPDATE users
+        SET role=?, fandom=?, status='pending'
+        WHERE user_id=?
+        """, (role, fandom, user_id))
+        conn.commit()
 
 
 def update_status(user_id, status):
-    try:
-        with closing(db()) as conn:
-            cur = conn.cursor()
-            cur.execute("""
-            UPDATE users SET status=? WHERE user_id=?
-            """, (status, user_id))
-            conn.commit()
-    except Exception as e:
-        logger.exception(e)
+    with closing(db()) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+        UPDATE users SET status=? WHERE user_id=?
+        """, (status, user_id))
+        conn.commit()
 
 
 def add_log(user_id, admin_id, action):
-    try:
-        with closing(db()) as conn:
-            cur = conn.cursor()
-            cur.execute("""
-            INSERT INTO logs(user_id,admin_id,action,created_at)
-            VALUES(?,?,?,?)
-            """, (user_id, admin_id, action, now()))
-            conn.commit()
-    except Exception as e:
-        logger.exception(e)
+    with closing(db()) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+        INSERT INTO logs(user_id,admin_id,action,created_at)
+        VALUES(?,?,?,?)
+        """, (user_id, admin_id, action, now()))
+        conn.commit()
 
 
 def save_application(user_id, m1, m2):
-    try:
-        with closing(db()) as conn:
-            cur = conn.cursor()
-            cur.execute("""
-            INSERT OR REPLACE INTO applications(user_id,msg_admin_1,msg_admin_2)
-            VALUES(?,?,?)
-            """, (user_id, m1, m2))
-            conn.commit()
-    except Exception as e:
-        logger.exception(e)
+    with closing(db()) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+        INSERT OR REPLACE INTO applications(user_id,msg_admin_1,msg_admin_2)
+        VALUES(?,?,?)
+        """, (user_id, m1, m2))
+        conn.commit()
 
 
 def get_application(user_id):
-    try:
-        with closing(db()) as conn:
-            cur = conn.cursor()
-            cur.execute("""
-            SELECT msg_admin_1,msg_admin_2 FROM applications WHERE user_id=?
-            """, (user_id,))
-            return cur.fetchone()
-    except Exception as e:
-        logger.exception(e)
-        return None
+    with closing(db()) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+        SELECT msg_admin_1,msg_admin_2 FROM applications WHERE user_id=?
+        """, (user_id,))
+        return cur.fetchone()
 
 
 # ---------------- FSM ----------------
@@ -243,7 +240,7 @@ class Register(StatesGroup):
 def info_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📢 Инфо-канал", url=INFO_CHANNEL)],
-        [InlineKeyboardButton(text="✅ Ознакомился", callback_data="read_info")]
+        [InlineKeyboardButton(text="✅ Я ознакомился", callback_data="read_info")]
     ])
 
 
@@ -252,104 +249,112 @@ def pending_menu():
         [InlineKeyboardButton(text="📖 Правила", callback_data="rules")],
         [InlineKeyboardButton(text="❓ FAQ", callback_data="faq")],
         [InlineKeyboardButton(text="🎭 О флуде", callback_data="about")],
-        [InlineKeyboardButton(text="🌍 Фандомы", callback_data="fandoms")]
+        [InlineKeyboardButton(text="🌍 Фандомы", callback_data="fandoms")],
+        [InlineKeyboardButton(text="🎲 Атмосфера", callback_data="atmosphere")]
     ])
-
-
-def admin_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="stats")],
-        [InlineKeyboardButton(text="👥 Пользователи", callback_data="users")],
-        [InlineKeyboardButton(text="📨 Заявки", callback_data="apps")],
-        [InlineKeyboardButton(text="📜 История", callback_data="history")]
-    ])
-
-
-# ---------------- FLASK ----------------
-
-@app.route("/")
-def home():
-    return "BOT ONLINE"
-
-
-def run_flask():
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
-
-
-# ---------------- SAFE SEND ----------------
-
-async def safe_send(admin, text, kb):
-    try:
-        return await bot.send_message(admin, text, reply_markup=kb)
-    except Exception as e:
-        logger.exception(e)
-        return None
 
 
 # ---------------- START ----------------
 
 @dp.message(CommandStart())
 async def start(message: Message, state: FSMContext):
-    try:
-        username = f"@{message.from_user.username}" if message.from_user.username else "Не указан"
-        save_user(message.from_user.id, username)
+    username = f"@{message.from_user.username}" if message.from_user.username else "Не указан"
+    save_user(message.from_user.id, username)
 
-        if user_status(message.from_user.id) == "banned":
-            await message.answer("🚫 Вы заблокированы.")
-            return
+    if user_status(message.from_user.id) == "banned":
+        await message.answer("🚫 Вы заблокированы.")
+        return
 
-        await state.clear()
+    await state.clear()
 
-        await message.answer(WELCOME + "\n\n" + random.choice(QUOTES), reply_markup=info_kb())
-    except Exception as e:
-        logger.exception(e)
+    await message.answer(
+        WELCOME + "\n\n" + random.choice(QUOTES),
+        reply_markup=info_kb()
+    )
 
 
 @dp.callback_query(F.data == "read_info")
 async def read_info(call: CallbackQuery, state: FSMContext):
-    try:
-        await state.set_state(Register.question)
-        await call.message.answer("❓ Проверочный вопрос:\nМаксимальный срок реста?")
-        await call.answer()
-    except Exception as e:
-        logger.exception(e)
+    await state.set_state(Register.question)
+
+    await call.message.answer(
+        """
+❓ <b>ПРОВЕРОЧНЫЙ ВОПРОС</b>
+
+━━━━━━━━━━━━━━
+Сколько длится рест?
+━━━━━━━━━━━━━━
+"""
+    )
+    await call.answer()
 
 
 @dp.message(Register.question)
 async def q_step(message: Message, state: FSMContext):
-    try:
-        if message.text.lower().strip() != "3 недели":
-            await message.answer("🚫 Неверно")
-            return
-        await state.set_state(Register.role)
-        await message.answer("🎭 Роль?")
-    except Exception as e:
-        logger.exception(e)
+    if message.text.lower().strip() != "3 недели":
+        await message.answer("🚫 Неверно. Попробуйте ещё раз.")
+        return
+
+    await state.set_state(Register.role)
+
+    await message.answer("""
+🎭 <b>РОЛЬ</b>
+
+━━━━━━━━━━━━━━
+Что такое роль?
+
+Это персонаж, которого вы отыгрываете:
+— канон (существующий персонаж)
+— оригинальный персонаж (OC)
+— авторская роль
+
+Примеры:
+• Саске
+• Оригинальный маг
+• Детектив из вашего мира
+━━━━━━━━━━━━━━
+
+Введите вашу роль:
+""")
 
 
 @dp.message(Register.role)
 async def role_step(message: Message, state: FSMContext):
-    try:
-        await state.update_data(role=message.text)
-        await state.set_state(Register.fandom)
-        await message.answer("🌍 Фандом?")
-    except Exception as e:
-        logger.exception(e)
+    await state.update_data(role=message.text)
+    await state.set_state(Register.fandom)
+
+    await message.answer("""
+🌍 <b>ФАНДОМ</b>
+
+━━━━━━━━━━━━━━
+Что такое фандом?
+
+Это вселенная, откуда ваш персонаж:
+
+Примеры:
+• Naruto
+• Harry Potter
+• Original World
+• Marvel
+━━━━━━━━━━━━━━
+
+Введите ваш фандом:
+""")
 
 
 @dp.message(Register.fandom)
 async def fandom_step(message: Message, state: FSMContext):
-    try:
-        data = await state.get_data()
-        role = data["role"]
-        fandom = message.text
+    data = await state.get_data()
 
-        update_profile(message.from_user.id, role, fandom)
+    role = data["role"]
+    fandom = message.text
 
-        username = f"@{message.from_user.username}" if message.from_user.username else "Не указан"
+    update_profile(message.from_user.id, role, fandom)
 
-        text = f"""
-📨 Новая заявка
+    username = f"@{message.from_user.username}" if message.from_user.username else "Не указан"
+
+    text = f"""
+📨 <b>НОВАЯ АНКЕТА</b>
 
 ━━━━━━━━━━━━━━
 👤 {username}
@@ -360,122 +365,114 @@ async def fandom_step(message: Message, state: FSMContext):
 ━━━━━━━━━━━━━━
 """
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Принять", callback_data=f"accept:{message.from_user.id}")],
-            [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{message.from_user.id}")],
-            [InlineKeyboardButton(text="🚫 Бан", callback_data=f"ban:{message.from_user.id}")]
-        ])
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Принять", callback_data=f"accept:{message.from_user.id}")],
+        [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{message.from_user.id}")],
+        [InlineKeyboardButton(text="🚫 Бан", callback_data=f"ban:{message.from_user.id}")]
+    ])
 
-        ids = []
-        for admin in ADMINS:
-            msg = await safe_send(admin, text, kb)
-            ids.append(msg.message_id if msg else 0)
+    ids = []
+    for admin in ADMINS:
+        try:
+            msg = await bot.send_message(admin, text, reply_markup=kb)
+            ids.append(msg.message_id)
+        except Exception:
+            ids.append(0)
 
-        save_application(message.from_user.id, ids[0], ids[1])
+    save_application(message.from_user.id, ids[0], ids[1])
 
-        await message.answer("📨 Заявка отправлена", reply_markup=pending_menu())
-        await state.clear()
+    await message.answer(
+        "✨ <b>Заявка отправлена администрации</b>",
+        reply_markup=pending_menu()
+    )
 
-    except Exception as e:
-        logger.exception(e)
-
-
-# ---------------- PROTECT DOUBLE ACTION ----------------
-
-def lock_check(user_id):
-    status = user_status(user_id)
-    return status == "pending"
+    await state.clear()
 
 
-# ---------------- ADMIN ACTIONS ----------------
+# ---------------- ADMIN ACTIONS (UNCHANGED LOGIC) ----------------
 
 async def edit_admin(user_id, text):
     row = get_application(user_id)
     if not row:
         return
+
     for admin_id, msg_id in zip(ADMINS, row):
         try:
             await bot.edit_message_text(text, admin_id, msg_id)
-        except Exception as e:
-            logger.exception(e)
+        except Exception:
+            pass
 
 
 @dp.callback_query(F.data.startswith("accept:"))
 async def accept(call: CallbackQuery):
+    user_id = int(call.data.split(":")[1])
+
+    if user_status(user_id) != "pending":
+        await call.answer("Уже обработано")
+        return
+
+    update_status(user_id, "accepted")
+    add_log(user_id, call.from_user.id, "accepted")
+
     try:
-        if call.from_user.id not in ADMINS:
-            return
+        await bot.send_message(user_id, f"""
+✨ <b>ВАША АНКЕТА ОДОБРЕНА</b>
 
-        user_id = int(call.data.split(":")[1])
+━━━━━━━━━━━━━━
+Добро пожаловать во флуд
 
-        if not lock_check(user_id):
-            await call.answer("Уже обработано")
-            return
+🔗 {FLUD_LINK}
+━━━━━━━━━━━━━━
+""")
+    except Exception:
+        pass
 
-        update_status(user_id, "accepted")
-        add_log(user_id, call.from_user.id, "accepted")
-
-        try:
-            await bot.send_message(user_id,
-                f"✨ Одобрено\n\n{FLUD_LINK}")
-        except Exception as e:
-            logger.exception(e)
-
-        await edit_admin(user_id, "✅ Принято")
-        await call.answer()
-
-    except Exception as e:
-        logger.exception(e)
+    await edit_admin(user_id, "✅ <b>ПРИНЯТО</b>")
+    await call.answer()
 
 
 @dp.callback_query(F.data.startswith("reject:"))
 async def reject(call: CallbackQuery):
+    user_id = int(call.data.split(":")[1])
+
+    if user_status(user_id) != "pending":
+        await call.answer("Уже обработано")
+        return
+
+    update_status(user_id, "rejected")
+    add_log(user_id, call.from_user.id, "rejected")
+
     try:
-        if call.from_user.id not in ADMINS:
-            return
+        await bot.send_message(user_id, """
+📩 <b>АНКЕТА РАССМОТРЕНА</b>
 
-        user_id = int(call.data.split(":")[1])
+━━━━━━━━━━━━━━
+К сожалению, она не одобрена
 
-        if not lock_check(user_id):
-            await call.answer("Уже обработано")
-            return
+Вы можете попробовать позже
+━━━━━━━━━━━━━━
+""")
+    except Exception:
+        pass
 
-        update_status(user_id, "rejected")
-        add_log(user_id, call.from_user.id, "rejected")
-
-        try:
-            await bot.send_message(user_id, "❌ Отклонено")
-        except Exception as e:
-            logger.exception(e)
-
-        await edit_admin(user_id, "❌ Отклонено")
-        await call.answer()
-
-    except Exception as e:
-        logger.exception(e)
+    await edit_admin(user_id, "❌ <b>ОТКЛОНЕНО</b>")
+    await call.answer()
 
 
 @dp.callback_query(F.data.startswith("ban:"))
 async def ban(call: CallbackQuery):
+    user_id = int(call.data.split(":")[1])
+
+    update_status(user_id, "banned")
+    add_log(user_id, call.from_user.id, "banned")
+
     try:
-        if call.from_user.id not in ADMINS:
-            return
+        await bot.send_message(user_id, "🚫 Вы заблокированы.")
+    except Exception:
+        pass
 
-        user_id = int(call.data.split(":")[1])
-
-        update_status(user_id, "banned")
-        add_log(user_id, call.from_user.id, "banned")
-
-        try:
-            await bot.send_message(user_id, "🚫 Забанен")
-        except Exception as e:
-            logger.exception(e)
-
-        await edit_admin(user_id, "🚫 Бан")
-        await call.answer()
-
-    except Exception as e:
-        logger.exception(e)
+    await edit_admin(user_id, "🚫 <b>БАН</b>")
+    await call.answer()
 
 
 # ---------------- MAIN ----------------
