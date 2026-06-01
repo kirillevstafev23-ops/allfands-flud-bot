@@ -2,6 +2,7 @@ import os
 import asyncio
 import sqlite3
 import time
+import logging
 from datetime import datetime
 from contextlib import closing
 
@@ -12,48 +13,92 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
+)
 
-# ---------------- CONFIG ----------------
+# =========================
+# CONFIG
+# =========================
 
 TOKEN = os.getenv("TOKEN")
 
-ADMINS = [1739947062, 5655991466]
+ADMINS = [
+    1739947062,
+    5655991466
+]
 
 INFO_CHANNEL = "https://t.me/+rFs7nnx639BmNzgy"
-FLUD_LINK = "https://t.me/+zTukwrwrqlgxOGUy"
+MAIN_LINK = "https://t.me/+zTukwrwrqlgxOGUy"
 
-# ---------------- BOT ----------------
+SPAM_DELAY = 10
+
+# =========================
+# LOGGING
+# =========================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+
+# =========================
+# TOKEN CHECK
+# =========================
+
+if not TOKEN:
+    raise ValueError("TOKEN environment variable not found")
+
+# =========================
+# BOT
+# =========================
 
 bot = Bot(
     token=TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    default=DefaultBotProperties(
+        parse_mode=ParseMode.HTML
+    )
 )
 
 dp = Dispatcher(storage=MemoryStorage())
 
-# ---------------- ANTI-SPAM ----------------
+# =========================
+# ANTI SPAM
+# =========================
 
-_last = {}
-SPAM_DELAY = 10
+user_last_action = {}
 
-def spam(uid: int):
-    now = time.time()
-    if now - _last.get(uid, 0) < SPAM_DELAY:
-        return True
-    _last[uid] = now
+
+def is_spam(user_id: int) -> bool:
+    now_time = time.time()
+
+    if user_id in user_last_action:
+        if now_time - user_last_action[user_id] < SPAM_DELAY:
+            return True
+
+    user_last_action[user_id] = now_time
     return False
 
-# ---------------- DB ----------------
 
-def db():
-    return sqlite3.connect("bot.db", check_same_thread=False)
+# =========================
+# DATABASE
+# =========================
+
+DB_NAME = "bot.db"
+
+
+def get_db():
+    return sqlite3.connect(DB_NAME, check_same_thread=False)
+
 
 def init_db():
-    with closing(db()) as conn:
-        cur = conn.cursor()
+    with closing(get_db()) as conn:
+        cursor = conn.cursor()
 
-        cur.execute("""
+        cursor.execute("""
         CREATE TABLE IF NOT EXISTS users(
             user_id INTEGER PRIMARY KEY,
             username TEXT,
@@ -66,256 +111,503 @@ def init_db():
 
         conn.commit()
 
-def now():
-    return datetime.now().strftime("%d.%m.%Y %H:%M")
 
-def save_user(uid, username):
-    with closing(db()) as conn:
-        cur = conn.cursor()
-        cur.execute("""
-        INSERT OR IGNORE INTO users(user_id, username, created_at)
+def current_time():
+    return datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+
+
+def save_user(user_id: int, username: str):
+    with closing(get_db()) as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("""
+        INSERT OR IGNORE INTO users(
+            user_id,
+            username,
+            created_at
+        )
         VALUES (?, ?, ?)
-        """, (uid, username, now()))
+        """, (
+            user_id,
+            username,
+            current_time()
+        ))
+
         conn.commit()
 
-def get_status(uid):
-    with closing(db()) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT status FROM users WHERE user_id=?", (uid,))
-        row = cur.fetchone()
-        return row[0] if row else None
 
-def set_status(uid, status):
-    with closing(db()) as conn:
-        cur = conn.cursor()
-        cur.execute("UPDATE users SET status=? WHERE user_id=?", (status, uid))
+def get_status(user_id: int):
+    with closing(get_db()) as conn:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT status FROM users WHERE user_id=?",
+            (user_id,)
+        )
+
+        row = cursor.fetchone()
+
+        if row:
+            return row[0]
+
+        return None
+
+
+def set_status(user_id: int, status: str):
+    with closing(get_db()) as conn:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "UPDATE users SET status=? WHERE user_id=?",
+            (status, user_id)
+        )
+
         conn.commit()
 
-def update_profile(uid, role, fandom):
-    with closing(db()) as conn:
-        cur = conn.cursor()
-        cur.execute("""
+
+def update_profile(user_id: int, role: str, fandom: str):
+    with closing(get_db()) as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("""
         UPDATE users
-        SET role=?, fandom=?, status='pending'
+        SET role=?,
+            fandom=?,
+            status='pending'
         WHERE user_id=?
-        """, (role, fandom, uid))
+        """, (
+            role,
+            fandom,
+            user_id
+        ))
+
         conn.commit()
 
-# ---------------- FSM ----------------
+
+# =========================
+# FSM
+# =========================
 
 class Form(StatesGroup):
     question = State()
     role = State()
     fandom = State()
 
-# ---------------- UI ----------------
 
-def start_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="ꕥ 𖤐 информационный канал", url=INFO_CHANNEL)],
-        [InlineKeyboardButton(text="✦ продолжить путь", callback_data="start_form")]
-    ])
+# =========================
+# KEYBOARDS
+# =========================
 
-def admin_kb(uid):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton("✓ принять", callback_data=f"accept:{uid}"),
-            InlineKeyboardButton("✕ отклонить", callback_data=f"reject:{uid}")
-        ],
-        [InlineKeyboardButton("⛧ бан", callback_data=f"ban:{uid}")]
-    ])
+def start_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✦ Информационный канал",
+                    url=INFO_CHANNEL
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✦ Продолжить путь",
+                    callback_data="start_form"
+                )
+            ]
+        ]
+    )
 
-# ---------------- START ----------------
+
+def admin_keyboard(user_id: int):
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Принять",
+                    callback_data=f"accept:{user_id}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отклонить",
+                    callback_data=f"reject:{user_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⛔ Бан",
+                    callback_data=f"ban:{user_id}"
+                )
+            ]
+        ]
+    )
+
+
+# =========================
+# HELPERS
+# =========================
+
+def is_admin(user_id: int):
+    return user_id in ADMINS
+
+
+# =========================
+# START
+# =========================
 
 @dp.message(CommandStart())
-async def start(message: Message, state: FSMContext):
+async def start_handler(
+    message: Message,
+    state: FSMContext
+):
+    try:
+        user_id = message.from_user.id
 
-    if spam(message.from_user.id):
-        await message.answer("…")
-        return
+        if is_spam(user_id):
+            await message.answer(
+                "⏳ Подождите несколько секунд."
+            )
+            return
 
-    save_user(
-        message.from_user.id,
-        f"@{message.from_user.username}" if message.from_user.username else "no_name"
-    )
+        username = (
+            f"@{message.from_user.username}"
+            if message.from_user.username
+            else "no_username"
+        )
 
-    if get_status(message.from_user.id) == "banned":
-        await message.answer("⛧ доступ закрыт")
-        return
+        save_user(user_id, username)
 
-    await state.clear()
+        if get_status(user_id) == "banned":
+            await message.answer(
+                "⛔ Вам запрещено пользоваться ботом."
+            )
+            return
 
-    text = (
-        "𖤐 <b>…ты здесь</b>\n\n"
-        "━━━━━━━━━━━━━━\n"
-        "«Каждое пространство начинается с одного шага внутрь»\n\n"
-        "Этот проект — не просто чат.\n"
-        "Это место, где люди становятся частью общего потока, истории и атмосферы.\n\n"
-        "Но прежде чем двери откроются полностью — тебе нужно пройти небольшой путь.\n"
-        "━━━━━━━━━━━━━━\n\n"
-        "ꕥ ознакомься с информацией и продолжи, когда будешь готов."
-    )
+        await state.clear()
 
-    await message.answer(text, reply_markup=start_kb())
+        text = (
+            "𖤐 <b>Добро пожаловать.</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "Иногда путь начинается не с шага,\n"
+            "а с решения открыть дверь.\n\n"
+            "Перед тобой небольшая анкета.\n"
+            "Пройди её и дождись решения администрации.\n\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+            "Сначала ознакомься с информацией."
+        )
 
-# ---------------- STEP 1 ----------------
+        await message.answer(
+            text,
+            reply_markup=start_keyboard()
+        )
+
+    except Exception as e:
+        logging.exception(e)
+
+
+# =========================
+# START FORM
+# =========================
 
 @dp.callback_query(F.data == "start_form")
-async def start_form(call: CallbackQuery, state: FSMContext):
+async def start_form(
+    call: CallbackQuery,
+    state: FSMContext
+):
+    try:
+        if get_status(call.from_user.id) == "banned":
+            await call.answer(
+                "Доступ запрещён",
+                show_alert=True
+            )
+            return
 
-    await state.set_state(Form.question)
+        await state.set_state(Form.question)
 
-    await call.message.answer(
-        "⟡ <b>проверка</b>\n\n"
-        "прежде чем продолжить — ответь на вопрос:\n\n"
-        "❖ <b>какой максимальный срок реста?</b>\n\n"
-        "напиши ответ сообщением."
-    )
+        await call.message.answer(
+            "✦ Контрольный вопрос\n\n"
+            "<b>Какой максимальный срок реста?</b>\n\n"
+            "Отправьте ответ сообщением."
+        )
 
-    await call.answer()
+        await call.answer()
 
-# ---------------- STEP 2 ----------------
+    except Exception as e:
+        logging.exception(e)
+
+
+# =========================
+# QUESTION
+# =========================
 
 @dp.message(Form.question)
-async def question(message: Message, state: FSMContext):
+async def question_step(
+    message: Message,
+    state: FSMContext
+):
+    try:
+        answer = message.text.strip().lower()
 
-    if message.text.lower().strip() != "3 недели":
-        await message.answer("⟡ неверно. попробуй ещё раз.")
-        return
+        if answer != "3 недели":
+            await message.answer(
+                "❌ Неверно.\n"
+                "Попробуйте ещё раз."
+            )
+            return
 
-    await state.set_state(Form.role)
+        await state.set_state(Form.role)
 
-    await message.answer(
-        "✦ принято.\n\n"
-        "теперь скажи — какая у тебя роль?"
-    )
+        await message.answer(
+            "✅ Верно.\n\n"
+            "Теперь укажите вашу роль."
+        )
 
-# ---------------- STEP 3 ----------------
+    except Exception as e:
+        logging.exception(e)
+
+
+# =========================
+# ROLE
+# =========================
 
 @dp.message(Form.role)
-async def role(message: Message, state: FSMContext):
+async def role_step(
+    message: Message,
+    state: FSMContext
+):
+    try:
+        await state.update_data(
+            role=message.text.strip()
+        )
 
-    await state.update_data(role=message.text)
-    await state.set_state(Form.fandom)
+        await state.set_state(Form.fandom)
 
-    await message.answer(
-        "𖤐 хорошо.\n\n"
-        "и последний шаг — твой фандом?"
-    )
+        await message.answer(
+            "✦ Укажите ваш фандом."
+        )
 
-# ---------------- STEP 4 ----------------
+    except Exception as e:
+        logging.exception(e)
+
+
+# =========================
+# FANDOM
+# =========================
 
 @dp.message(Form.fandom)
-async def fandom(message: Message, state: FSMContext):
+async def fandom_step(
+    message: Message,
+    state: FSMContext
+):
+    try:
+        data = await state.get_data()
 
-    data = await state.get_data()
+        role = data.get("role")
+        fandom = message.text.strip()
 
-    role = data.get("role")
-    fandom = message.text
+        username = (
+            f"@{message.from_user.username}"
+            if message.from_user.username
+            else "no_username"
+        )
 
-    if not role:
+        update_profile(
+            message.from_user.id,
+            role,
+            fandom
+        )
+
+        set_status(
+            message.from_user.id,
+            "pending"
+        )
+
+        application_text = (
+            "📨 <b>Новая заявка</b>\n\n"
+            f"👤 Username: {username}\n"
+            f"🆔 ID: <code>{message.from_user.id}</code>\n"
+            f"🎭 Роль: {role}\n"
+            f"🌌 Фандом: {fandom}\n"
+            f"🕒 Время: {current_time()}"
+        )
+
+        for admin in ADMINS:
+            try:
+                await bot.send_message(
+                    admin,
+                    application_text,
+                    reply_markup=admin_keyboard(
+                        message.from_user.id
+                    )
+                )
+            except Exception as admin_error:
+                logging.exception(admin_error)
+
         await message.answer(
-            "Произошла ошибка анкеты. Пожалуйста, начни заново через /start"
+            "✅ Анкета успешно отправлена.\n\n"
+            "Ожидайте решения администрации."
         )
+
         await state.clear()
-        return
 
-    update_profile(message.from_user.id, role, fandom)
-    set_status(message.from_user.id, "pending")
+    except Exception as e:
+        logging.exception(e)
+        await state.clear()
 
-    username = (
-        f"@{message.from_user.username}"
-        if message.from_user.username
-        else "no_name"
-    )
 
-    text = (
-        "⟡ <b>новая заявка</b>\n"
-        "━━━━━━━━━━━━━━\n"
-        f"❖ пользователь: {username}\n"
-        f"❖ id: {message.from_user.id}\n"
-        f"❖ роль: {role}\n"
-        f"❖ фандом: {fandom}\n"
-        f"❖ время: {now()}\n"
-        "━━━━━━━━━━━━━━"
-    )
-
-    for admin in ADMINS:
-        await bot.send_message(
-            admin,
-            text,
-            reply_markup=admin_kb(message.from_user.id)
-        )
-
-    await message.answer(
-        "𖤐 <b>Заявка отправлена.</b>\n\n"
-        "Спасибо за заполнение анкеты.\n"
-        "Теперь остаётся дождаться решения администрации."
-    )
-
-    await state.clear()
-
-# ---------------- ADMIN ----------------
-
-def is_admin(uid):
-    return uid in ADMINS
+# =========================
+# ACCEPT
+# =========================
 
 @dp.callback_query(F.data.startswith("accept:"))
-async def accept(call: CallbackQuery):
+async def accept_application(
+    call: CallbackQuery
+):
+    try:
+        if not is_admin(call.from_user.id):
+            await call.answer()
+            return
 
-    if not is_admin(call.from_user.id):
-        return
+        user_id = int(
+            call.data.split(":")[1]
+        )
 
-    uid = int(call.data.split(":")[1])
+        set_status(
+            user_id,
+            "accepted"
+        )
 
-    set_status(uid, "accepted")
+        try:
+            await bot.send_message(
+                user_id,
+                (
+                    "🎉 <b>Ваша заявка одобрена.</b>\n\n"
+                    "Добро пожаловать.\n\n"
+                    f"{MAIN_LINK}"
+                )
+            )
+        except Exception as user_error:
+            logging.exception(user_error)
 
-    await bot.send_message(
-        uid,
-        "𖤐 <b>дверь открыта</b>\n\n"
-        f"ты принят.\n\n{FLUD_LINK}"
-    )
+        await call.message.edit_text(
+            "✅ Заявка принята"
+        )
 
-    await call.message.edit_text("✓ принято")
-    await call.answer()
+        await call.answer(
+            "Принято"
+        )
 
+    except Exception as e:
+        logging.exception(e)
+
+
+# =========================
+# REJECT
+# =========================
 
 @dp.callback_query(F.data.startswith("reject:"))
-async def reject(call: CallbackQuery):
+async def reject_application(
+    call: CallbackQuery
+):
+    try:
+        if not is_admin(call.from_user.id):
+            await call.answer()
+            return
 
-    if not is_admin(call.from_user.id):
-        return
+        user_id = int(
+            call.data.split(":")[1]
+        )
 
-    uid = int(call.data.split(":")[1])
+        set_status(
+            user_id,
+            "rejected"
+        )
 
-    set_status(uid, "rejected")
+        try:
+            await bot.send_message(
+                user_id,
+                "❌ Ваша заявка была отклонена."
+            )
+        except Exception as user_error:
+            logging.exception(user_error)
 
-    await bot.send_message(uid, "✕ заявка отклонена")
+        await call.message.edit_text(
+            "❌ Заявка отклонена"
+        )
 
-    await call.message.edit_text("✕ отклонено")
-    await call.answer()
+        await call.answer(
+            "Отклонено"
+        )
 
+    except Exception as e:
+        logging.exception(e)
+
+
+# =========================
+# BAN
+# =========================
 
 @dp.callback_query(F.data.startswith("ban:"))
-async def ban(call: CallbackQuery):
+async def ban_application(
+    call: CallbackQuery
+):
+    try:
+        if not is_admin(call.from_user.id):
+            await call.answer()
+            return
 
-    if not is_admin(call.from_user.id):
-        return
+        user_id = int(
+            call.data.split(":")[1]
+        )
 
-    uid = int(call.data.split(":")[1])
+        set_status(
+            user_id,
+            "banned"
+        )
 
-    set_status(uid, "banned")
+        try:
+            await bot.send_message(
+                user_id,
+                "⛔ Вы были заблокированы."
+            )
+        except Exception as user_error:
+            logging.exception(user_error)
 
-    await bot.send_message(uid, "⛧ доступ закрыт")
+        await call.message.edit_text(
+            "⛔ Пользователь заблокирован"
+        )
 
-    await call.message.edit_text("⛧ бан")
-    await call.answer()
+        await call.answer(
+            "Пользователь заблокирован"
+        )
 
-# ---------------- MAIN ----------------
+    except Exception as e:
+        logging.exception(e)
+
+
+# =========================
+# GLOBAL ERROR HANDLER
+# =========================
+
+@dp.error()
+async def error_handler(event, exception):
+    logging.exception(
+        f"Unhandled error: {exception}"
+    )
+    return True
+
+
+# =========================
+# MAIN
+# =========================
 
 async def main():
     init_db()
-    await dp.start_polling(bot)
+
+    logging.info("Bot started")
+
+    await dp.start_polling(
+        bot,
+        allowed_updates=dp.resolve_used_update_types()
+    )
+
 
 if __name__ == "__main__":
     asyncio.run(main())
