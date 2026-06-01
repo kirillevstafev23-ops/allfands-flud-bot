@@ -214,20 +214,24 @@ async def fandom(message: Message, state: FSMContext):
 
     data = await state.get_data()
 
-role = data.get("role")
-fandom = message.text
+    role = data.get("role")
+    fandom = message.text
 
-if not role:
-    await message.answer(
-        "Произошла ошибка анкеты. Пожалуйста, начни заново через /start"
-    )
-    await state.clear()
-    return
+    if not role:
+        await message.answer(
+            "Произошла ошибка анкеты. Пожалуйста, начни заново через /start"
+        )
+        await state.clear()
+        return
 
     update_profile(message.from_user.id, role, fandom)
     set_status(message.from_user.id, "pending")
 
-    username = f"@{message.from_user.username}" if message.from_user.username else "no_name"
+    username = (
+        f"@{message.from_user.username}"
+        if message.from_user.username
+        else "no_name"
+    )
 
     text = (
         "⟡ <b>новая заявка</b>\n"
@@ -241,17 +245,19 @@ if not role:
     )
 
     for admin in ADMINS:
-        await bot.send_message(admin, text, reply_markup=admin_kb(message.from_user.id))
+        await bot.send_message(
+            admin,
+            text,
+            reply_markup=admin_kb(message.from_user.id)
+        )
 
     await message.answer(
-        "𖤐 <b>заявка отправлена</b>\n\n"
-        "ожидай ответа администрации."
+        "𖤐 <b>Заявка отправлена.</b>\n\n"
+        "Спасибо за заполнение анкеты.\n"
+        "Теперь остаётся дождаться решения администрации."
     )
 
-    try:
     await state.clear()
-except:
-    pass
 
 # ---------------- ADMIN ----------------
 
