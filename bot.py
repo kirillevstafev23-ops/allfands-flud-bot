@@ -32,16 +32,16 @@ bot = Bot(
 
 dp = Dispatcher(storage=MemoryStorage())
 
-# ---------------- ANTI SPAM (light) ----------------
+# ---------------- ANTI-SPAM ----------------
 
-last_action = {}
-SPAM_DELAY = 8
+_last = {}
+SPAM_DELAY = 10
 
-def is_spam(user_id: int):
+def spam(uid: int):
     now = time.time()
-    if now - last_action.get(user_id, 0) < SPAM_DELAY:
+    if now - _last.get(uid, 0) < SPAM_DELAY:
         return True
-    last_action[user_id] = now
+    _last[uid] = now
     return False
 
 # ---------------- DB ----------------
@@ -112,17 +112,17 @@ class Form(StatesGroup):
 
 def start_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Инфо-канал", url=INFO_CHANNEL)],
-        [InlineKeyboardButton(text="🚀 Начать", callback_data="start_form")]
+        [InlineKeyboardButton(text="ꕥ 𖤐 информационный канал", url=INFO_CHANNEL)],
+        [InlineKeyboardButton(text="✦ продолжить путь", callback_data="start_form")]
     ])
 
 def admin_kb(uid):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton("✅ Принять", callback_data=f"accept:{uid}"),
-            InlineKeyboardButton("❌ Отклонить", callback_data=f"reject:{uid}")
+            InlineKeyboardButton("✓ принять", callback_data=f"accept:{uid}"),
+            InlineKeyboardButton("✕ отклонить", callback_data=f"reject:{uid}")
         ],
-        [InlineKeyboardButton("🚫 Бан", callback_data=f"ban:{uid}")]
+        [InlineKeyboardButton("⛧ бан", callback_data=f"ban:{uid}")]
     ])
 
 # ---------------- START ----------------
@@ -130,28 +130,30 @@ def admin_kb(uid):
 @dp.message(CommandStart())
 async def start(message: Message, state: FSMContext):
 
-    if is_spam(message.from_user.id):
-        await message.answer("⏳ Слишком часто. Подождите.")
+    if spam(message.from_user.id):
+        await message.answer("…")
         return
 
     save_user(
         message.from_user.id,
-        f"@{message.from_user.username}" if message.from_user.username else "no_username"
+        f"@{message.from_user.username}" if message.from_user.username else "no_name"
     )
 
     if get_status(message.from_user.id) == "banned":
-        await message.answer("🚫 Доступ запрещён.")
+        await message.answer("⛧ доступ закрыт")
         return
 
     await state.clear()
 
     text = (
-        "🌙 <b>Добро пожаловать</b>\n\n"
+        "𖤐 <b>…ты здесь</b>\n\n"
         "━━━━━━━━━━━━━━\n"
-        "✨ Это анкета для вступления во флуд-сообщество\n"
-        "📌 Перед началом ознакомься с информацией\n"
+        "«Каждое пространство начинается с одного шага внутрь»\n\n"
+        "Этот проект — не просто чат.\n"
+        "Это место, где люди становятся частью общего потока, истории и атмосферы.\n\n"
+        "Но прежде чем двери откроются полностью — тебе нужно пройти небольшой путь.\n"
         "━━━━━━━━━━━━━━\n\n"
-        "👇 Нажми кнопку ниже"
+        "ꕥ ознакомься с информацией и продолжи, когда будешь готов."
     )
 
     await message.answer(text, reply_markup=start_kb())
@@ -161,16 +163,17 @@ async def start(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "start_form")
 async def start_form(call: CallbackQuery, state: FSMContext):
 
-    if is_spam(call.from_user.id):
-        await call.answer("⏳ Подождите")
+    if spam(call.from_user.id):
+        await call.answer("…")
         return
 
     await state.set_state(Form.question)
 
     await call.message.answer(
-        "🧠 <b>Проверка</b>\n\n"
-        "Сколько длится рест?\n\n"
-        "✍️ Ответ одним сообщением"
+        "⟡ <b>проверка</b>\n\n"
+        "прежде чем продолжить — ответь на вопрос:\n\n"
+        "❖ <b>какой максимальный срок реста?</b>\n\n"
+        "напиши ответ сообщением."
     )
 
     await call.answer()
@@ -181,11 +184,15 @@ async def start_form(call: CallbackQuery, state: FSMContext):
 async def question(message: Message, state: FSMContext):
 
     if message.text.lower().strip() != "3 недели":
-        await message.answer("❌ Неверно. Попробуйте ещё раз.")
+        await message.answer("⟡ неверно. попробуй ещё раз.")
         return
 
     await state.set_state(Form.role)
-    await message.answer("🎭 Укажите вашу роль")
+
+    await message.answer(
+        "✦ принято.\n\n"
+        "теперь скажи — какая у тебя роль?"
+    )
 
 # ---------------- STEP 3 ----------------
 
@@ -195,19 +202,22 @@ async def role(message: Message, state: FSMContext):
     await state.update_data(role=message.text)
     await state.set_state(Form.fandom)
 
-    await message.answer("🌍 Укажите ваш фандом")
+    await message.answer(
+        "𖤐 хорошо.\n\n"
+        "и последний шаг — твой фандом?"
+    )
 
 # ---------------- STEP 4 ----------------
 
 @dp.message(Form.fandom)
 async def fandom(message: Message, state: FSMContext):
 
-    if is_spam(message.from_user.id):
-        await message.answer("⏳ Подождите")
+    if spam(message.from_user.id):
+        await message.answer("…")
         return
 
     if get_status(message.from_user.id) == "pending":
-        await message.answer("⚠️ Вы уже отправляли заявку")
+        await message.answer("⟡ заявка уже существует")
         return
 
     data = await state.get_data()
@@ -218,16 +228,16 @@ async def fandom(message: Message, state: FSMContext):
     update_profile(message.from_user.id, role, fandom)
     set_status(message.from_user.id, "pending")
 
-    username = f"@{message.from_user.username}" if message.from_user.username else "no_username"
+    username = f"@{message.from_user.username}" if message.from_user.username else "no_name"
 
     text = (
-        "📨 <b>НОВАЯ ЗАЯВКА</b>\n"
+        "⟡ <b>новая заявка</b>\n"
         "━━━━━━━━━━━━━━\n"
-        f"👤 {username}\n"
-        f"🆔 {message.from_user.id}\n"
-        f"🎭 {role}\n"
-        f"🌍 {fandom}\n"
-        f"🕰 {now()}\n"
+        f"❖ пользователь: {username}\n"
+        f"❖ id: {message.from_user.id}\n"
+        f"❖ роль: {role}\n"
+        f"❖ фандом: {fandom}\n"
+        f"❖ время: {now()}\n"
         "━━━━━━━━━━━━━━"
     )
 
@@ -235,8 +245,8 @@ async def fandom(message: Message, state: FSMContext):
         await bot.send_message(admin, text, reply_markup=admin_kb(message.from_user.id))
 
     await message.answer(
-        "✅ <b>Заявка отправлена</b>\n"
-        "⏳ Ожидайте решения администрации"
+        "𖤐 <b>заявка отправлена</b>\n\n"
+        "ожидай ответа администрации."
     )
 
     await state.clear()
@@ -258,10 +268,11 @@ async def accept(call: CallbackQuery):
 
     await bot.send_message(
         uid,
-        f"🎉 <b>Заявка одобрена</b>\n\n👉 {FLUD_LINK}"
+        "𖤐 <b>дверь открыта</b>\n\n"
+        f"ты принят.\n\n{FLUD_LINK}"
     )
 
-    await call.message.edit_text("✅ ПРИНЯТО")
+    await call.message.edit_text("✓ принято")
     await call.answer()
 
 
@@ -275,9 +286,9 @@ async def reject(call: CallbackQuery):
 
     set_status(uid, "rejected")
 
-    await bot.send_message(uid, "❌ Заявка отклонена")
+    await bot.send_message(uid, "✕ заявка отклонена")
 
-    await call.message.edit_text("❌ ОТКЛОНЕНО")
+    await call.message.edit_text("✕ отклонено")
     await call.answer()
 
 
@@ -291,9 +302,9 @@ async def ban(call: CallbackQuery):
 
     set_status(uid, "banned")
 
-    await bot.send_message(uid, "🚫 Вы заблокированы")
+    await bot.send_message(uid, "⛧ доступ закрыт")
 
-    await call.message.edit_text("🚫 БАН")
+    await call.message.edit_text("⛧ бан")
     await call.answer()
 
 # ---------------- MAIN ----------------
