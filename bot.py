@@ -668,7 +668,15 @@ async def send_admin_reply(
     await state.clear()
 
 
+@dp.message(F.photo)
+async def get_photo_id(message: Message):
+    await message.answer(
+        f"<code>{message.photo[-1].file_id}</code>"
+    )
+
+
 @dp.error()
+async def error_handler(event, exception):
 async def error_handler(event, exception):
     logging.exception(
         f"Unhandled error: {exception}"
