@@ -677,7 +677,6 @@ async def get_photo_id(message: Message):
 
 @dp.error()
 async def error_handler(event, exception):
-async def error_handler(event, exception):
     logging.exception(
         f"Unhandled error: {exception}"
     )
