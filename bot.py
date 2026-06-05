@@ -51,6 +51,8 @@ dp = Dispatcher(storage=MemoryStorage())
 
 user_last_action = {}
 
+admin_reply_targets = {}
+
 DB_NAME = "bot.db"
 
 
@@ -164,6 +166,9 @@ class Form(StatesGroup):
     role = State()
     fandom = State()
 
+    support_message = State()
+    admin_reply = State()
+
 
 def start_keyboard():
     return InlineKeyboardMarkup(
@@ -178,6 +183,12 @@ def start_keyboard():
                 InlineKeyboardButton(
                     text="✦ Продолжить путь",
                     callback_data="start_form"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🆘 Техподдержка",
+                    callback_data="support"
                 )
             ]
         ]
@@ -534,6 +545,127 @@ async def ban_application(
 
     except Exception as e:
         logging.exception(e)
+
+@dp.callback_query(F.data == "support")
+async def support_start(
+    call: CallbackQuery,
+    state: FSMContext
+):
+    await state.set_state(Form.support_message)
+
+    await call.message.answer(
+        "✉️ Напишите ваше обращение одним сообщением."
+    )
+
+    await call.answer()
+
+
+@dp.message(Form.support_message)
+async def support_send(
+    message: Message,
+    state: FSMContext
+):
+    username = (
+        f"@{message.from_user.username}"
+        if message.from_user.username
+        else "no_username"
+    )
+
+    text = (
+        "🆘 <b>Новое обращение</b>\n\n"
+        f"👤 {username}\n"
+        f"🆔 <code>{message.from_user.id}</code>\n\n"
+        f"{message.text}"
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✉️ Ответить",
+                    callback_data=f"reply:{message.from_user.id}"
+                )
+            ]
+        ]
+    )
+
+    for admin in ADMINS:
+        await bot.send_message(
+            admin,
+            text,
+            reply_markup=keyboard
+        )
+
+    await message.answer(
+        "✅ Ваше обращение отправлено администрации."
+    )
+
+    await state.clear()
+
+
+@dp.callback_query(F.data.startswith("reply:"))
+async def reply_to_user(
+    call: CallbackQuery,
+    state: FSMContext
+):
+    if not is_admin(call.from_user.id):
+        return
+
+    user_id = int(call.data.split(":")[1])
+
+    admin_reply_targets[call.from_user.id] = user_id
+
+    await state.set_state(Form.admin_reply)
+
+    await call.message.answer(
+        f"✉️ Напишите ответ пользователю {user_id}"
+    )
+
+    await call.answer()
+
+
+@dp.message(Form.admin_reply)
+async def send_admin_reply(
+    message: Message,
+    state: FSMContext
+):
+    if not is_admin(message.from_user.id):
+        return
+
+    user_id = admin_reply_targets.get(
+        message.from_user.id
+    )
+
+    if not user_id:
+        await message.answer(
+            "Ошибка. Пользователь не найден."
+        )
+        return
+
+    try:
+        await bot.send_message(
+            user_id,
+            (
+                "📩 <b>Ответ администрации</b>\n\n"
+                f"{message.text}"
+            )
+        )
+
+        await message.answer(
+            "✅ Ответ отправлен."
+        )
+
+    except Exception:
+        await message.answer(
+            "❌ Не удалось отправить ответ."
+        )
+
+    admin_reply_targets.pop(
+        message.from_user.id,
+        None
+    )
+
+    await state.clear()
 
 
 @dp.error()
