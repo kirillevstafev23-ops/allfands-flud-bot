@@ -29,6 +29,7 @@ ADMINS = [
 
 INFO_CHANNEL = "https://t.me/+rFs7nnx639BmNzgy"
 MAIN_LINK = "https://t.me/+zTukwrwrqlgxOGUy"
+WELCOME_PHOTO = "AgACAgIAAxkBAAICymojObWxrhIRPXTXZJ9zgas5SV3_AAIUHmsbIK0ZSYVrYoZLwvQuAQADAgADeQADOwQ"
 
 SPAM_DELAY = 10
 
@@ -263,10 +264,11 @@ async def start_handler(
             "Сначала ознакомься с информацией."
         )
 
-        await message.answer(
-            text,
-            reply_markup=start_keyboard()
-        )
+        await message.answer_photo(
+    photo=WELCOME_PHOTO,
+    caption=text,
+    reply_markup=start_keyboard()
+)
 
     except Exception as e:
         logging.exception(e)
@@ -666,13 +668,6 @@ async def send_admin_reply(
     )
 
     await state.clear()
-
-
-@dp.message(F.photo)
-async def get_photo_id(message: Message):
-    await message.answer(
-        f"<code>{message.photo[-1].file_id}</code>"
-    )
 
 
 @dp.error()
